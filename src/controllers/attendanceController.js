@@ -14,6 +14,9 @@ export const scanAttendance = async (req, res) => {
             });
 
         }
+        
+
+
 
         // 1. Check QR Token
 
@@ -114,3 +117,88 @@ export const scanAttendance = async (req, res) => {
     }
 
 };
+
+export const getStudentAttendance = async (req, res) => {
+    try {
+        const { studentId } = req.params;
+
+        const attendanceRecords = await Attendance.find({
+            student: studentId,
+        })
+            .populate({
+                path: "session",
+                select: "course lecturer startTime endTime status",
+                populate: [
+                    {
+                        path: "course",
+                        select: "courseName courseCode",
+                    },
+                    {
+                        path: "lecturer",
+                        select: "name email",
+                    },
+                ],
+            })
+            .populate({
+                path: "course",
+                select: "courseName courseCode",
+            })
+            .populate({
+                path: "lecturer",
+                select: "name email",
+            })
+            .sort({ createdAt: -1 });
+
+        res.status(200).json({
+            attendance: attendanceRecords,
+        });
+    } catch (error) {
+        res.status(500).json({
+            message: "Server Error",
+            error: error.message,
+        });
+    }
+};
+
+export const getLecturerAttendanceSessions = async (req, res) => {
+    try {
+        const { lecturerId } = req.params;
+
+        const sessions = await AttendanceSession.find({
+            lecturer: lecturerId,
+        })
+            .populate({
+                path: "course",
+                select: "courseName courseCode",
+            })
+            .populate({
+                path: "courseAssignment",
+                select: "academicYear semester",
+            })
+            .sort({
+                createdAt: -1,
+            });
+
+        const results = await Promise.all(
+            sessions.map(async (session) => {
+                const totalStudents = await Attendance.countDocuments({
+                    session: session._id,
+                });
+                return {
+                    ...session.toObject(),
+                    totalStudents,
+                };
+            })
+        );
+
+        res.status(200).json({
+            sessions: results,
+        });
+    } catch (error) {
+        res.status(500).json({
+            message: "Server Error",
+            error: error.message,
+        });
+    }
+};
+
