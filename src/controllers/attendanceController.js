@@ -1,6 +1,12 @@
 import Attendance from "../models/Attendance.js";
 import AttendanceSession from "../models/AttendanceSession.js";
 
+/*
+|--------------------------------------------------------------------------
+| Scan Attendance
+|--------------------------------------------------------------------------
+*/
+
 export const scanAttendance = async (req, res) => {
 
     try {
@@ -14,11 +20,8 @@ export const scanAttendance = async (req, res) => {
             });
 
         }
-        
 
-
-
-        // 1. Check QR Token
+        // Check QR Token
 
         const session = await AttendanceSession.findOne({
             qrToken,
@@ -32,7 +35,7 @@ export const scanAttendance = async (req, res) => {
 
         }
 
-        // 2. Check Session Status
+        // Check Session Status
 
         if (session.status !== "active") {
 
@@ -42,7 +45,7 @@ export const scanAttendance = async (req, res) => {
 
         }
 
-        // 3. Check Expiry
+        // Check Expiry
 
         if (new Date() > session.endTime) {
 
@@ -56,47 +59,41 @@ export const scanAttendance = async (req, res) => {
 
         }
 
-        // 4. Check Duplicate Scan
+        // Check Duplicate Scan
 
-        const alreadyScanned =
-            await Attendance.findOne({
+        const alreadyScanned = await Attendance.findOne({
 
-                student: studentId,
+            student: studentId,
 
-                session: session._id,
+            session: session._id,
 
-            });
+        });
 
         if (alreadyScanned) {
 
             return res.status(400).json({
-
-                message:
-                    "Attendance already recorded."
-
+                message: "Attendance already recorded."
             });
 
         }
 
         // Save Attendance
 
-        const attendance =
-            await Attendance.create({
+        const attendance = await Attendance.create({
 
-                student: studentId,
+            student: studentId,
 
-                lecturer: session.lecturer,
+            lecturer: session.lecturer,
 
-                course: session.course,
+            course: session.course,
 
-                session: session._id,
+            session: session._id,
 
-            });
+        });
 
         res.status(201).json({
 
-            message:
-                "Attendance recorded successfully.",
+            message: "Attendance recorded successfully.",
 
             attendance,
 
@@ -108,7 +105,7 @@ export const scanAttendance = async (req, res) => {
 
         res.status(500).json({
 
-            message: "Server error.",
+            message: "Server Error",
 
             error: error.message,
 
@@ -117,88 +114,203 @@ export const scanAttendance = async (req, res) => {
     }
 
 };
+
+
 
 export const getStudentAttendance = async (req, res) => {
+
     try {
+
         const { studentId } = req.params;
 
-        const attendanceRecords = await Attendance.find({
+        const attendance = await Attendance.find({
+
             student: studentId,
+
         })
-            .populate({
-                path: "session",
-                select: "course lecturer startTime endTime status",
-                populate: [
-                    {
-                        path: "course",
-                        select: "courseName courseCode",
-                    },
-                    {
-                        path: "lecturer",
-                        select: "name email",
-                    },
-                ],
-            })
-            .populate({
-                path: "course",
-                select: "courseName courseCode",
-            })
-            .populate({
-                path: "lecturer",
-                select: "name email",
-            })
-            .sort({ createdAt: -1 });
+
+        .populate({
+
+            path: "course",
+
+            select: "courseName courseCode",
+
+        })
+
+        .populate({
+
+            path: "lecturer",
+
+            select: "name email",
+
+        })
+
+        .populate({
+
+            path: "session",
+
+            select: "startTime endTime status",
+
+        })
+
+        .sort({
+
+            createdAt: -1,
+
+        });
 
         res.status(200).json({
-            attendance: attendanceRecords,
+
+            attendance,
+
         });
-    } catch (error) {
-        res.status(500).json({
-            message: "Server Error",
-            error: error.message,
-        });
+
     }
+
+    catch (error) {
+
+        res.status(500).json({
+
+            message: "Server Error",
+
+            error: error.message,
+
+        });
+
+    }
+
 };
 
+
+
 export const getLecturerAttendanceSessions = async (req, res) => {
+
     try {
+
         const { lecturerId } = req.params;
 
         const sessions = await AttendanceSession.find({
+
             lecturer: lecturerId,
+
         })
-            .populate({
-                path: "course",
-                select: "courseName courseCode",
-            })
-            .populate({
-                path: "courseAssignment",
-                select: "academicYear semester",
-            })
-            .sort({
-                createdAt: -1,
-            });
+
+        .populate({
+
+            path: "course",
+
+            select: "courseName courseCode",
+
+        })
+
+        .populate({
+
+            path: "courseAssignment",
+
+            select: "academicYear semester",
+
+        })
+
+        .sort({
+
+            createdAt: -1,
+
+        });
 
         const results = await Promise.all(
+
             sessions.map(async (session) => {
+
                 const totalStudents = await Attendance.countDocuments({
+
                     session: session._id,
+
                 });
+
                 return {
+
                     ...session.toObject(),
+
                     totalStudents,
+
                 };
+
             })
+
         );
 
         res.status(200).json({
+
             sessions: results,
+
         });
-    } catch (error) {
-        res.status(500).json({
-            message: "Server Error",
-            error: error.message,
-        });
+
     }
+
+    catch (error) {
+
+        res.status(500).json({
+
+            message: "Server Error",
+
+            error: error.message,
+
+        });
+
+    }
+
 };
 
+/*
+|--------------------------------------------------------------------------
+| Get Students For One Attendance Session
+|--------------------------------------------------------------------------
+*/
+
+export const getSessionAttendance = async (req, res) => {
+
+    try {
+
+        const { sessionId } = req.params;
+
+        const attendance = await Attendance.find({
+
+            session: sessionId,
+
+        })
+
+        .populate({
+
+            path: "student",
+
+            select: "name indexNumber email",
+
+        })
+
+        .sort({
+
+            scannedAt: 1,
+
+        });
+
+        res.status(200).json({
+
+            attendance,
+
+        });
+
+    }
+
+    catch (error) {
+
+        res.status(500).json({
+
+            message: "Server Error",
+
+            error: error.message,
+
+        });
+
+    }
+
+};
