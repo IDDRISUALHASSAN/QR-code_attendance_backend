@@ -51,6 +51,16 @@ verificationCodeExpires: {
   default: null,
 },
 
+resetPasswordCode: {
+    type: String,
+    default: null,
+},
+
+resetPasswordCodeExpires: {
+    type: Date,
+    default: null,
+},
+
     department: {
       type: String,
       default: null,

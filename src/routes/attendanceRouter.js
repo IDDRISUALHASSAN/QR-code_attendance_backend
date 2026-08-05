@@ -1,6 +1,7 @@
 import express from "express";
 
-import {scanAttendance, getStudentAttendance, getLecturerAttendanceSessions, getSessionAttendance,} from "../controllers/attendanceController.js";
+
+import {scanAttendance, getStudentAttendance, getLecturerAttendanceSessions, getSessionAttendance, } from "../controllers/attendanceController.js";
 
 
 const router = express.Router();
