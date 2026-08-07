@@ -1,11 +1,7 @@
 import Attendance from "../models/Attendance.js";
 import AttendanceSession from "../models/AttendanceSession.js";
 
-/*
-|--------------------------------------------------------------------------
-| Scan Attendance
-|--------------------------------------------------------------------------
-*/
+
 
 export const scanAttendance = async (req, res) => {
 
@@ -261,11 +257,7 @@ export const getLecturerAttendanceSessions = async (req, res) => {
 
 };
 
-/*
-|--------------------------------------------------------------------------
-| Get Students For One Attendance Session
-|--------------------------------------------------------------------------
-*/
+
 
 export const getSessionAttendance = async (req, res) => {
 
