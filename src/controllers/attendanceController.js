@@ -306,3 +306,47 @@ export const getSessionAttendance = async (req, res) => {
     }
 
 };
+
+
+export const getAllAttendance = async (req, res) => {
+  try {
+
+    const attendance = await Attendance.find()
+
+      .populate({
+        path: "student",
+        select: "name indexNumber email",
+      })
+
+      .populate({
+        path: "lecturer",
+        select: "name staffId email",
+      })
+
+      .populate({
+        path: "course",
+        select: "courseName courseCode",
+      })
+
+      .populate({
+        path: "session",
+        select: "startTime endTime status",
+      })
+
+      .sort({
+        scannedAt: -1,
+      });
+
+    res.status(200).json({
+      attendance,
+    });
+
+  } catch (error) {
+
+    res.status(500).json({
+      message: "Server Error",
+      error: error.message,
+    });
+
+  }
+};

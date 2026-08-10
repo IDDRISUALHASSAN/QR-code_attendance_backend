@@ -1,29 +1,61 @@
 import express from "express";
 
+import {
+  scanAttendance,
+  getStudentAttendance,
+  getLecturerAttendanceSessions,
+  getSessionAttendance,
+  getAllAttendance,
+} from "../controllers/attendanceController.js";
 
-import {scanAttendance, getStudentAttendance, getLecturerAttendanceSessions, getSessionAttendance, } from "../controllers/attendanceController.js";
-
+import { protect } from "../middleware/authMiddleware.js";
+import { authorizeRoles } from "../middleware/roleMiddleware.js";
 
 const router = express.Router();
 
+
+// Student scans QR
 router.post(
-    "/scan",
-    scanAttendance
+  "/scan",
+  protect,
+  authorizeRoles("student"),
+  scanAttendance
 );
 
+
+// Student views attendance history
 router.get(
-    "/student/:studentId",
-    getStudentAttendance
+  "/student/:studentId",
+  protect,
+  authorizeRoles("student"),
+  getStudentAttendance
 );
 
+
+// Lecturer views their attendance sessions
 router.get(
-    "/lecturer/:lecturerId",
-    getLecturerAttendanceSessions
+  "/lecturer/:lecturerId",
+  protect,
+  authorizeRoles("lecturer"),
+  getLecturerAttendanceSessions
 );
 
+
+// Lecturer views students who attended a session
 router.get(
-    "/session/:sessionId",
-    getSessionAttendance
+  "/session/:sessionId",
+  protect,
+  authorizeRoles("lecturer"),
+  getSessionAttendance
+);
+
+
+// Admin views attendance report
+router.get(
+  "/report",
+  protect,
+  authorizeRoles("admin"),
+  getAllAttendance
 );
 
 
