@@ -2,128 +2,119 @@ import bcrypt from "bcryptjs";
 import User from "../models/User.js";
 import generateToken from "../utils/generateToken.js";
 import generateOTP from "../utils/generateOTP.js";
-import { sendOTPEmail } from "../services/emailService.js";
-import crypto from "crypto";
-import nodemailer from "nodemailer";
-
-
-
+import { sendOTPEmail, sendPasswordResetEmail } from "../services/emailService.js";
 
 // Temporary store for pending registrations
 const pendingUsers = {};
 
-// Register user - send OTP first, don't save yet
+// ======================= REGISTER =======================
 export const registerUser = async (req, res) => {
   try {
-    const {
-      name,
-      email,
-      password,
-      role,
-      indexNumber,
-      staffId,
-      department,
-      level,
-    } = req.body;
+    const { name, email, password, role, indexNumber, staffId, department, level } = req.body;
 
     if (!name || !email || !password || !role) {
-      return res.status(400).json({
-        message: "Name, email, password and role are required",
-      });
+      return res.status(400).json({ message: "Name, email, password and role are required" });
     }
 
     const validRoles = ["admin", "lecturer", "student"];
     if (!validRoles.includes(role)) {
-      return res.status(400).json({
-        message: "Invalid role selected",
-      });
+      return res.status(400).json({ message: "Invalid role selected" });
     }
 
-    // Check if user already exists in database
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return res.status(400).json({
-        message: "User already exists with this email",
-      });
+      return res.status(400).json({ message: "User already exists with this email" });
     }
 
-    // Hash password
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
-    // Generate OTP
+    const hashedPassword = await bcrypt.hash(password, 10);
     const otp = generateOTP();
     const otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
 
-    // Store user data temporarily (not in database yet)
     pendingUsers[email] = {
       name,
       email,
       password: hashedPassword,
       role,
       indexNumber: role === "student" ? indexNumber : null,
-      staffId: role === "lecturer" || role === "admin" ? staffId : null,
+      staffId: role !== "student" ? staffId : null,
       department,
       level: role === "student" ? level : null,
       otp,
       otpExpiry,
     };
 
-    // Send OTP email
     await sendOTPEmail(email, otp);
-
-    res.status(200).json({
-      message: "Verification code sent to your email. Please verify to complete registration.",
-    });
-
+    res.status(200).json({ message: "Verification code sent to your email. Please verify to complete registration." });
   } catch (error) {
-    res.status(500).json({
-      message: "Server error during registration",
-      error: error.message,
-    });
+    res.status(500).json({ message: "Server error during registration", error: error.message });
   }
 };
 
+// ======================= VERIFY EMAIL =======================
+// ======================= VERIFY EMAIL =======================
 
-// Verify email - save user to database after OTP is confirmed
 export const verifyEmail = async (req, res) => {
   try {
     const { email, otp } = req.body;
 
+    // Check required fields
     if (!email || !otp) {
       return res.status(400).json({
         message: "Email and OTP are required.",
       });
     }
 
-    // Check if there is a pending registration
-    const pending = pendingUsers[email];
+    // Normalize email and OTP
+    const normalizedEmail = email.trim().toLowerCase();
+    const enteredOTP = String(otp).trim();
+
+    // Find pending registration
+    const pending = pendingUsers[normalizedEmail];
 
     if (!pending) {
       return res.status(404).json({
-        message: "No pending registration found. Please register first.",
+        message:
+          "No pending registration found. Please register first.",
       });
     }
 
-    // Check if OTP matches
-    if (pending.otp !== otp) {
+    // Check OTP expiry FIRST
+    if (new Date() > pending.otpExpiry) {
+      delete pendingUsers[normalizedEmail];
+
+      return res.status(400).json({
+        message:
+          "Verification code has expired. Please register again.",
+      });
+    }
+
+    // Normalize stored OTP
+    const storedOTP = String(pending.otp).trim();
+
+    // Check OTP
+    if (enteredOTP !== storedOTP) {
       return res.status(400).json({
         message: "Invalid verification code.",
       });
     }
 
-    // Check if OTP has expired
-    if (new Date() > pending.otpExpiry) {
-      delete pendingUsers[email];
+    // Make sure the email wasn't registered while pending
+    const existingUser = await User.findOne({
+      email: normalizedEmail,
+    });
+
+    if (existingUser) {
+      delete pendingUsers[normalizedEmail];
+
       return res.status(400).json({
-        message: "Verification code has expired. Please register again.",
+        message: "An account with this email already exists.",
       });
     }
 
-    // Now save the user to the database
+    // Create the verified user
     const user = await User.create({
       name: pending.name,
-      email: pending.email,
+      email: normalizedEmail,
       password: pending.password,
       role: pending.role,
       indexNumber: pending.indexNumber,
@@ -133,11 +124,13 @@ export const verifyEmail = async (req, res) => {
       isVerified: true,
     });
 
-    // Remove from temporary store
-    delete pendingUsers[email];
+    // Remove temporary registration
+    delete pendingUsers[normalizedEmail];
 
-    res.status(201).json({
-      message: "Email verified successfully. Registration complete. You can now log in.",
+    return res.status(201).json({
+      message:
+        "Email verified successfully. Registration complete. You can now log in.",
+
       user: {
         id: user._id,
         name: user.name,
@@ -147,348 +140,113 @@ export const verifyEmail = async (req, res) => {
     });
 
   } catch (error) {
-    res.status(500).json({
-      message: "Server error",
+    console.error("Verify email error:", error);
+
+    return res.status(500).json({
+      message: "Server error during email verification.",
       error: error.message,
     });
   }
 };
-
-
-// Resend OTP
+// ======================= RESEND OTP =======================
 export const resendOTP = async (req, res) => {
   try {
     const { email } = req.body;
-
-    // Check if there is a pending registration
     const pending = pendingUsers[email];
+    if (!pending) return res.status(404).json({ message: "No pending registration found. Please register first." });
 
-    if (!pending) {
-      return res.status(404).json({
-        message: "No pending registration found. Please register first.",
-      });
-    }
-
-    // Generate new OTP
     const otp = generateOTP();
     pending.otp = otp;
     pending.otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
 
-    // Send new OTP
     await sendOTPEmail(email, otp);
-
-    res.status(200).json({
-      message: "A new verification code has been sent.",
-    });
-
+    res.status(200).json({ message: "A new verification code has been sent." });
   } catch (error) {
-    res.status(500).json({
-      message: "Server error",
-      error: error.message,
-    });
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
-
-// Login user
+// ======================= LOGIN =======================
 export const loginUser = async (req, res) => {
   try {
     const { email, password, role } = req.body;
-
-    if (!email || !password || !role) {
-      return res.status(400).json({
-        message: "Email, password and role are required",
-      });
-    }
+    if (!email || !password || !role) return res.status(400).json({ message: "Email, password and role are required" });
 
     const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(401).json({
-        message: "Invalid email or password",
-      });
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json({ message: "Invalid email or password" });
     }
 
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(401).json({
-        message: "Invalid email or password",
-      });
-    }
-
-    if (user.role !== role) {
-      return res.status(403).json({
-        message: `This account is not registered as ${role}`,
-      });
-    }
+    if (user.role !== role) return res.status(403).json({ message: `This account is not registered as ${role}` });
 
     res.status(200).json({
       message: "Login successful",
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
+      user: { id: user._id, name: user.name, email: user.email, role: user.role },
       token: generateToken(user),
     });
-
   } catch (error) {
-    res.status(500).json({
-      message: "Server error during login",
-      error: error.message,
-    });
+    res.status(500).json({ message: "Server error during login", error: error.message });
   }
 };
 
-// forgotten password
-
+// ======================= FORGOT PASSWORD =======================
 export const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: "Email is required." });
 
-    try {
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ message: "No account found with this email." });
 
-        const { email } = req.body;
+    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+    user.resetPasswordCode = resetCode;
+    user.resetPasswordCodeExpires = new Date(Date.now() + 10 * 60 * 1000);
+    await user.save();
 
-        if (!email) {
-
-            return res.status(400).json({
-                message: "Email is required."
-            });
-
-        }
-
-        const user = await User.findOne({ email });
-
-        if (!user) {
-
-            return res.status(404).json({
-                message: "No account found with this email."
-            });
-
-        }
-
-        // Generate 6-digit code
-
-        const resetCode = Math.floor(
-            100000 + Math.random() * 900000
-        ).toString();
-
-        user.resetPasswordCode = resetCode;
-        user.resetPasswordCodeExpires = new Date(
-            Date.now() + 10 * 60 * 1000
-        ); // 10 minutes
-
-        await user.save();
-
-        const transporter = nodemailer.createTransport({
-
-            service: "gmail",
-
-            auth: {
-
-                user: process.env.EMAIL_USER,
-
-                pass: process.env.EMAIL_PASS,
-
-            },
-
-        });
-
-        await transporter.sendMail({
-
-            from: process.env.EMAIL_USER,
-
-            to: user.email,
-
-            subject: "QRAMS Password Reset",
-
-            html: `
-                <h2>Password Reset</h2>
-
-                <p>Your password reset code is:</p>
-
-                <h1>${resetCode}</h1>
-
-                <p>This code expires in 10 minutes.</p>
-            `,
-
-        });
-
-        res.status(200).json({
-
-            message: "Password reset code sent successfully.",
-
-        });
-
-    }
-
-    catch (error) {
-
-        res.status(500).json({
-
-            message: "Server Error",
-
-            error: error.message,
-
-        });
-
-    }
-
+    await sendPasswordResetEmail(user.email, resetCode);
+    res.status(200).json({ message: "Password reset code sent successfully." });
+  } catch (error) {
+    res.status(500).json({ message: "Server Error", error: error.message });
+  }
 };
 
-// verify oTP
+// ======================= VERIFY RESET CODE =======================
 export const verifyResetCode = async (req, res) => {
+  try {
+    const { email, code } = req.body;
+    if (!email || !code) return res.status(400).json({ message: "Email and code are required." });
 
-    try {
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ message: "User not found." });
+    if (user.resetPasswordCode !== code) return res.status(400).json({ message: "Invalid reset code." });
+    if (new Date() > user.resetPasswordCodeExpires) return res.status(400).json({ message: "Reset code has expired." });
 
-        const { email, code } = req.body;
-
-        if (!email || !code) {
-
-            return res.status(400).json({
-                message: "Email and code are required."
-            });
-
-        }
-
-        const user = await User.findOne({ email });
-
-        if (!user) {
-
-            return res.status(404).json({
-                message: "User not found."
-            });
-
-        }
-
-        if (user.resetPasswordCode !== code) {
-
-            return res.status(400).json({
-                message: "Invalid reset code."
-            });
-
-        }
-
-        if (new Date() > user.resetPasswordCodeExpires) {
-
-            return res.status(400).json({
-                message: "Reset code has expired."
-            });
-
-        }
-
-        res.status(200).json({
-            message: "Reset code verified successfully."
-        });
-
-    } catch (error) {
-
-        res.status(500).json({
-            message: "Server Error",
-            error: error.message,
-        });
-
-    }
-
+    res.status(200).json({ message: "Reset code verified successfully." });
+  } catch (error) {
+    res.status(500).json({ message: "Server Error", error: error.message });
+  }
 };
 
+// ======================= RESET PASSWORD =======================
 export const resetPassword = async (req, res) => {
-
-    try {
-
-        const {
-            email,
-            code,
-            newPassword,
-        } = req.body;
-
-        if (
-            !email ||
-            !code ||
-            !newPassword
-        ) {
-
-            return res.status(400).json({
-
-                message:
-                    "Email, code and new password are required.",
-
-            });
-
-        }
-
-        const user = await User.findOne({
-
-            email,
-
-        });
-
-        if (!user) {
-
-            return res.status(404).json({
-
-                message:
-                    "User not found.",
-
-            });
-
-        }
-
-        if (
-            user.resetPasswordCode !== code
-        ) {
-
-            return res.status(400).json({
-
-                message:
-                    "Invalid reset code.",
-
-            });
-
-        }
-
-        if (
-            new Date() >
-            user.resetPasswordCodeExpires
-        ) {
-
-            return res.status(400).json({
-
-                message:
-                    "Reset code has expired.",
-
-            });
-
-        }
-
-        const hashedPassword =
-            await bcrypt.hash(newPassword, 10);
-
-        user.password = hashedPassword;
-
-        user.resetPasswordCode = null;
-        user.resetPasswordCodeExpires = null;
-
-        await user.save();
-
-        res.status(200).json({
-
-            message:
-                "Password reset successfully.",
-
-        });
-
+  try {
+    const { email, code, newPassword } = req.body;
+    if (!email || !code || !newPassword) {
+      return res.status(400).json({ message: "Email, code and new password are required." });
     }
 
-    catch (error) {
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ message: "User not found." });
+    if (user.resetPasswordCode !== code) return res.status(400).json({ message: "Invalid reset code." });
+    if (new Date() > user.resetPasswordCodeExpires) return res.status(400).json({ message: "Reset code has expired." });
 
-        res.status(500).json({
+    user.password = await bcrypt.hash(newPassword, 10);
+    user.resetPasswordCode = null;
+    user.resetPasswordCodeExpires = null;
+    await user.save();
 
-            message: "Server Error",
-
-            error: error.message,
-
-        });
-
-    }
-
+    res.status(200).json({ message: "Password reset successfully." });
+  } catch (error) {
+    res.status(500).json({ message: "Server Error", error: error.message });
+  }
 };
