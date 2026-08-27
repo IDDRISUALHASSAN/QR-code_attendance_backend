@@ -1,53 +1,32 @@
+import nodemailer from "nodemailer";
+
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
 const sendEmail = async (email, subject, html) => {
-  const response = await fetch(
-    "https://api.brevo.com/v3/smtp/email",
-    {
-      method: "POST",
+  const mailOptions = {
+    from: `"QR Attendance Management System" <${process.env.EMAIL_USER}>`,
+    to: email,
+    subject,
+    html,
+  };
 
-      headers: {
-        accept: "application/json",
-        "api-key": process.env.BREVO_API_KEY,
-        "content-type": "application/json",
-      },
+  const info = await transporter.sendMail(mailOptions);
 
-      body: JSON.stringify({
-        sender: {
-          name: "QR Attendance Management System",
-          email: process.env.BREVO_SENDER_EMAIL,
-        },
+  console.log("Email sent successfully:", info.messageId);
 
-        to: [
-          {
-            email: email,
-          },
-        ],
-
-        subject: subject,
-
-        htmlContent: html,
-      }),
-    }
-  );
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    console.error("Brevo error:", data);
-
-    throw new Error(
-      data.message || "Failed to send email"
-    );
-  }
-
-  console.log("Email sent successfully:", data);
-
-  return data;
+  return info;
 };
 
 
-// Send OTP
-export const sendOTPEmail = async (email, otp) => {
+// ======================= SEND OTP =======================
 
+export const sendOTPEmail = async (email, otp) => {
   const html = `
     <div style="
       font-family: Arial, sans-serif;
@@ -104,7 +83,8 @@ export const sendOTPEmail = async (email, otp) => {
 };
 
 
-// Send password reset email
+// ======================= PASSWORD RESET =======================
+
 export const sendPasswordResetEmail = async (
   email,
   resetCode
