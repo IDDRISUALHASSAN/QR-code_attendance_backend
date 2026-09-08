@@ -1,4 +1,7 @@
 import User from "../models/User.js";
+import bcrypt from "bcryptjs";
+
+
 // Update lecturer
 export const updateLecturer = async (req, res) => {
   try {
@@ -80,6 +83,74 @@ export const deleteLecturer = async (req, res) => {
       error: error.message,
     });
 
+  }
+};
+// Add lecturer — Admin only
+export const createLecturer = async (req, res) => {
+  try {
+    const {
+      name,
+      email,
+      password,
+      staffId,
+      department,
+    } = req.body;
+
+    if (!name || !email || !password || !staffId) {
+      return res.status(400).json({
+        message:
+          "Name, email, password and staff ID are required.",
+      });
+    }
+
+    const existingUser = await User.findOne({
+      email: email.toLowerCase().trim(),
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        message: "A user with this email already exists.",
+      });
+    }
+
+    const existingStaff = await User.findOne({
+      staffId: staffId.trim(),
+    });
+
+    if (existingStaff) {
+      return res.status(400).json({
+        message: "A lecturer with this staff ID already exists.",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const lecturer = await User.create({
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      password: hashedPassword,
+      role: "lecturer",
+      staffId: staffId.trim(),
+      department: department || null,
+      indexNumber: null,
+      level: null,
+      isVerified: true,
+    });
+
+    const lecturerResponse = lecturer.toObject();
+    delete lecturerResponse.password;
+
+    res.status(201).json({
+      message: "Lecturer created successfully.",
+      lecturer: lecturerResponse,
+    });
+  } catch (error) {
+    console.error("Create lecturer error:", error);
+
+    res.status(500).json({
+      message: "Server error while creating lecturer.",
+      error: error.message,
+    });
   }
 };
 

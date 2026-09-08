@@ -2,8 +2,10 @@ import express from "express";
 import { protect } from "../middleware/authMiddleware.js";
 import { authorizeRoles } from "../middleware/roleMiddleware.js";
 
+
 import {
   getLecturers,
+  createLecturer,
   updateLecturer,
   deleteLecturer,
 } from "../controllers/lecturerController.js";
@@ -35,5 +37,11 @@ router.delete(
   deleteLecturer
 );
 
+router.post(
+  "/",
+  protect,
+  authorizeRoles("admin"),
+  createLecturer
+);
 
 export default router;
