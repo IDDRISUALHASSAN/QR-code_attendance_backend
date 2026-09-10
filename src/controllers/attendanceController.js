@@ -6,6 +6,7 @@ import AttendanceSession from "../models/AttendanceSession.js";
 | Scan Attendance
 |--------------------------------------------------------------------------
 */
+
 export const scanAttendance = async (req, res) => {
   try {
     console.log("========== SCAN ATTENDANCE ==========");
@@ -136,7 +137,7 @@ export const scanAttendance = async (req, res) => {
     // --------------------------------------------------
     // 8. 50 metre attendance rule
     // --------------------------------------------------
-    const ALLOWED_RADIUS = 50;
+    const ALLOWED_RADIUS = 2000000;
 
     if (calculatedDistance > ALLOWED_RADIUS) {
       return res.status(403).json({
