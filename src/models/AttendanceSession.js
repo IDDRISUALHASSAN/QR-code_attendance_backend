@@ -26,6 +26,25 @@ const attendanceSessionSchema = new mongoose.Schema(
       unique: true,
     },
 
+    // ==========================================
+    // LECTURER GPS LOCATION
+    // ==========================================
+
+    lecturerLatitude: {
+      type: Number,
+      required: true,
+    },
+
+    lecturerLongitude: {
+      type: Number,
+      required: true,
+    },
+
+    lecturerAccuracy: {
+      type: Number,
+      default: null,
+    },
+
     date: {
       type: Date,
       default: Date.now,

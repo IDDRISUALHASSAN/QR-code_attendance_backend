@@ -3,180 +3,336 @@ import crypto from "crypto";
 import AttendanceSession from "../models/AttendanceSession.js";
 import CourseAssignment from "../models/CourseAssignment.js";
 
-// Start Attendance Session
+// ==========================================
+// START ATTENDANCE SESSION
+// ==========================================
+
 export const startAttendanceSession = async (req, res) => {
+  try {
+    const {
+      courseAssignmentId,
+      duration = 15,
+      lecturerLatitude,
+      lecturerLongitude,
+      lecturerAccuracy,
+    } = req.body;
 
-    try {
+    // ==========================================
+    // VALIDATE COURSE ASSIGNMENT
+    // ==========================================
 
-const { courseAssignmentId, duration = 15, } = req.body;
-        if (!courseAssignmentId) {
+    if (!courseAssignmentId) {
+      return res.status(400).json({
+        message: "Course Assignment is required.",
+      });
+    }
 
-            return res.status(400).json({
-                message: "Course Assignment is required."
-            });
+    // ==========================================
+    // VALIDATE LECTURER GPS
+    // ==========================================
 
-        }
+    if (
+      lecturerLatitude === undefined ||
+      lecturerLatitude === null ||
+      lecturerLongitude === undefined ||
+      lecturerLongitude === null
+    ) {
+      return res.status(400).json({
+        message:
+          "Lecturer location is required. Please allow location access and try again.",
+      });
+    }
 
-        // Check assignment
+    const latitude = Number(lecturerLatitude);
+    const longitude = Number(lecturerLongitude);
 
-        const assignment =
-            await CourseAssignment.findById(courseAssignmentId);
+    const accuracy =
+      lecturerAccuracy !== undefined &&
+      lecturerAccuracy !== null
+        ? Number(lecturerAccuracy)
+        : null;
 
-        if (!assignment) {
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude)
+    ) {
+      return res.status(400).json({
+        message: "Invalid lecturer GPS coordinates.",
+      });
+    }
 
-            return res.status(404).json({
-                message: "Course Assignment not found."
-            });
+    // ==========================================
+    // VALID GPS RANGE
+    // ==========================================
 
-        }
+    if (latitude < -90 || latitude > 90) {
+      return res.status(400).json({
+        message: "Invalid lecturer latitude.",
+      });
+    }
 
-        // Check if active session already exists
+    if (longitude < -180 || longitude > 180) {
+      return res.status(400).json({
+        message: "Invalid lecturer longitude.",
+      });
+    }
 
-        const activeSession =
-            await AttendanceSession.findOne({
+    // ==========================================
+    // CHECK COURSE ASSIGNMENT
+    // ==========================================
 
-                courseAssignment: courseAssignmentId,
+    const assignment =
+      await CourseAssignment.findById(
+        courseAssignmentId
+      );
 
-                status: "active"
+    if (!assignment) {
+      return res.status(404).json({
+        message: "Course Assignment not found.",
+      });
+    }
 
-            });
+    // ==========================================
+    // CHECK ACTIVE SESSION
+    // ==========================================
 
-        if (activeSession) {
+    const activeSession =
+      await AttendanceSession.findOne({
+        courseAssignment: courseAssignmentId,
+        status: "active",
+      });
 
-    return res.status(200).json({
-
-        message: "Attendance session is already active.",
-
+    if (activeSession) {
+      return res.status(200).json({
+        message:
+          "Attendance session is already active.",
         session: activeSession,
+      });
+    }
 
-    });
+    // ==========================================
+    // GENERATE QR TOKEN
+    // ==========================================
 
-}
+    const qrToken =
+      crypto.randomBytes(16).toString("hex");
 
-        // Generate secure token
+    // ==========================================
+    // SESSION TIME
+    // ==========================================
 
-        const qrToken =
-            crypto.randomBytes(16).toString("hex");
+    const startTime = new Date();
 
-        const startTime = new Date();
-
-        const endTime = new Date( startTime.getTime() + Number(duration) * 60 * 1000
-
+    const endTime = new Date(
+      startTime.getTime() +
+        Number(duration) * 60 * 1000
     );
 
-        const session =
-            await AttendanceSession.create({
+    // ==========================================
+    // CREATE SESSION
+    // ==========================================
 
-                courseAssignment: assignment._id,
+    const session =
+      await AttendanceSession.create({
+        courseAssignment: assignment._id,
 
-                lecturer: assignment.lecturer,
+        lecturer: assignment.lecturer,
 
-                course: assignment.course,
+        course: assignment.course,
 
-                qrToken,
+        qrToken,
 
-                startTime,
+        lecturerLatitude: latitude,
 
-                endTime,
+        lecturerLongitude: longitude,
 
-            });
+        lecturerAccuracy: accuracy,
 
-        res.status(201).json({
+        startTime,
 
-            message:
-                "Attendance session started successfully.",
+        endTime,
+      });
 
-            session,
+    // ==========================================
+    // RESPONSE
+    // ==========================================
 
-        });
+    res.status(201).json({
+      message:
+        "Attendance session started successfully.",
 
-    } catch (error) {
+      session,
+    });
+  } catch (error) {
+    console.error(
+      "Start attendance session error:",
+      error
+    );
 
-        res.status(500).json({
-
-            message: "Server error.",
-
-            error: error.message,
-
-        });
-
-    }
-
+    res.status(500).json({
+      message: "Server error.",
+      error: error.message,
+    });
+  }
 };
 
-export const getAttendanceSessions = async (req, res) => {
+// ==========================================
+// GET ALL ATTENDANCE SESSIONS
+// ==========================================
 
-    try {
+export const getAttendanceSessions = async (
+  req,
+  res
+) => {
+  try {
+    const sessions =
+      await AttendanceSession.find()
+        .populate({
+          path: "lecturer",
+          select: "name staffId",
+        })
+        .populate({
+          path: "course",
+          select: "courseName courseCode",
+        })
+        .populate({
+          path: "courseAssignment",
+          select: "academicYear semester",
+        })
+        .sort({ createdAt: -1 });
 
-        const sessions = await AttendanceSession.find()
+    res.status(200).json({
+      sessions,
+    });
+  } catch (error) {
+    console.error(
+      "Get attendance sessions error:",
+      error
+    );
 
-            .populate({
-                path: "lecturer",
-                select: "name staffId",
-            })
-
-            .populate({
-                path: "course",
-                select: "courseName courseCode",
-            })
-
-            .populate({
-                path: "courseAssignment",
-                select: "academicYear semester",
-            })
-
-            .sort({ createdAt: -1 });
-
-        res.status(200).json({
-            sessions,
-        });
-
-    } catch (error) {
-
-        res.status(500).json({
-            message: "Server error.",
-            error: error.message,
-        });
-
-    }
-
+    res.status(500).json({
+      message: "Server error.",
+      error: error.message,
+    });
+  }
 };
 
+// ==========================================
+// GET SESSION BY QR TOKEN
+// ==========================================
 
-export const closeAttendanceSession = async (req, res) => {
+export const getAttendanceSessionByToken = async (
+  req,
+  res
+) => {
+  try {
+    const { qrToken } = req.params;
 
-    try {
-
-        const session =
-            await AttendanceSession.findById(req.params.id);
-
-        if (!session) {
-
-            return res.status(404).json({
-                message: "Attendance session not found.",
-            });
-
-        }
-
-        session.status = "closed";
-
-        await session.save();
-
-       res.status(200).json({
-
-    message: "Attendance session closed successfully.",
-
-    session,
-
-});
-
-    } catch (error) {
-
-        res.status(500).json({
-            message: "Server error.",
-            error: error.message,
-        });
-
+    if (!qrToken) {
+      return res.status(400).json({
+        message: "QR token is required.",
+      });
     }
 
+    const session =
+      await AttendanceSession.findOne({
+        qrToken,
+      }).populate({
+        path: "course",
+        select: "courseName courseCode",
+      });
+
+    if (!session) {
+      return res.status(404).json({
+        message: "Invalid QR Code.",
+      });
+    }
+
+    // ==========================================
+    // CHECK SESSION STATUS
+    // ==========================================
+
+    if (session.status !== "active") {
+      return res.status(400).json({
+        message:
+          "Attendance session is closed.",
+      });
+    }
+
+    // ==========================================
+    // CHECK EXPIRY
+    // ==========================================
+
+    if (new Date() > session.endTime) {
+      session.status = "closed";
+
+      await session.save();
+
+      return res.status(400).json({
+        message: "QR Code has expired.",
+      });
+    }
+
+    // ==========================================
+    // RETURN SESSION
+    // ==========================================
+
+    res.status(200).json({
+      session,
+    });
+  } catch (error) {
+    console.error(
+      "Get attendance session by token error:",
+      error
+    );
+
+    res.status(500).json({
+      message: "Server error.",
+      error: error.message,
+    });
+  }
+};
+
+// ==========================================
+// CLOSE ATTENDANCE SESSION
+// ==========================================
+
+export const closeAttendanceSession = async (
+  req,
+  res
+) => {
+  try {
+    const session =
+      await AttendanceSession.findById(
+        req.params.id
+      );
+
+    if (!session) {
+      return res.status(404).json({
+        message:
+          "Attendance session not found.",
+      });
+    }
+
+    session.status = "closed";
+
+    await session.save();
+
+    res.status(200).json({
+      message:
+        "Attendance session closed successfully.",
+
+      session,
+    });
+  } catch (error) {
+    console.error(
+      "Close attendance session error:",
+      error
+    );
+
+    res.status(500).json({
+      message: "Server error.",
+      error: error.message,
+    });
+  }
 };
