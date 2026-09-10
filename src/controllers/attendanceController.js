@@ -8,6 +8,9 @@ import AttendanceSession from "../models/AttendanceSession.js";
 */
 export const scanAttendance = async (req, res) => {
   try {
+    console.log("========== SCAN ATTENDANCE ==========");
+    console.log("BODY:", req.body);
+
     const {
       qrToken,
       studentId,
@@ -17,18 +20,33 @@ export const scanAttendance = async (req, res) => {
       distanceFromLecturer,
     } = req.body;
 
-    // ---------------------------------------------------------
-    // Validate required fields
-    // ---------------------------------------------------------
-    if (!qrToken || !studentId) {
+    // --------------------------------------------------
+    // 1. Validate required data
+    // --------------------------------------------------
+    if (!qrToken) {
       return res.status(400).json({
-        message: "QR Token and Student ID are required.",
+        message: "QR token is required",
       });
     }
 
-    // ---------------------------------------------------------
-    // Validate student GPS
-    // ---------------------------------------------------------
+    if (!studentId) {
+      return res.status(400).json({
+        message: "Student ID is required",
+      });
+    }
+
+    if (
+      latitude === undefined ||
+      longitude === undefined
+    ) {
+      return res.status(400).json({
+        message: "Student location is required",
+      });
+    }
+
+    // --------------------------------------------------
+    // 2. Validate student coordinates
+    // --------------------------------------------------
     const studentLatitude = Number(latitude);
     const studentLongitude = Number(longitude);
     const studentAccuracy =
@@ -36,158 +54,158 @@ export const scanAttendance = async (req, res) => {
         ? Number(accuracy)
         : null;
 
-    const recordedDistance =
+    if (
+      !Number.isFinite(studentLatitude) ||
+      !Number.isFinite(studentLongitude)
+    ) {
+      return res.status(400).json({
+        message: "Invalid student GPS coordinates",
+      });
+    }
+
+    // --------------------------------------------------
+    // 3. Find attendance session
+    // --------------------------------------------------
+    const session = await AttendanceSession.findOne({
+      qrToken,
+    });
+
+    console.log("SESSION:", session);
+
+    if (!session) {
+      return res.status(404).json({
+        message: "Attendance session not found",
+      });
+    }
+
+    // --------------------------------------------------
+    // 4. Check session status
+    // --------------------------------------------------
+    if (session.status !== "active") {
+      return res.status(400).json({
+        message: "Attendance session is closed",
+      });
+    }
+
+    // --------------------------------------------------
+    // 5. Check session expiry
+    // --------------------------------------------------
+    if (session.endTime && new Date() > new Date(session.endTime)) {
+      return res.status(400).json({
+        message: "Attendance session has expired",
+      });
+    }
+
+    // --------------------------------------------------
+    // 6. Make sure lecturer GPS exists
+    // --------------------------------------------------
+    if (
+      session.lecturerLatitude === undefined ||
+      session.lecturerLatitude === null ||
+      session.lecturerLongitude === undefined ||
+      session.lecturerLongitude === null
+    ) {
+      return res.status(400).json({
+        message: "Lecturer location is not available for this session",
+      });
+    }
+
+    // --------------------------------------------------
+    // 7. Validate distance
+    // --------------------------------------------------
+    const calculatedDistance =
       distanceFromLecturer !== undefined &&
       distanceFromLecturer !== null
         ? Number(distanceFromLecturer)
         : null;
 
     if (
-      !Number.isFinite(studentLatitude) ||
-      !Number.isFinite(studentLongitude)
+      calculatedDistance === null ||
+      !Number.isFinite(calculatedDistance)
     ) {
       return res.status(400).json({
-        message:
-          "Valid student location is required to record attendance.",
+        message: "Distance from lecturer is required",
       });
     }
 
-    // ---------------------------------------------------------
-    // Check QR Token
-    // ---------------------------------------------------------
-    const session = await AttendanceSession.findOne({
-      qrToken,
-    });
+    console.log("Student latitude:", studentLatitude);
+    console.log("Student longitude:", studentLongitude);
+    console.log("Student accuracy:", studentAccuracy);
+    console.log("Distance:", calculatedDistance);
 
-    if (!session) {
-      return res.status(404).json({
-        message: "Invalid QR Code.",
-      });
-    }
+    // --------------------------------------------------
+    // 8. 50 metre attendance rule
+    // --------------------------------------------------
+    const ALLOWED_RADIUS = 50;
 
-    // ---------------------------------------------------------
-    // Check Session Status
-    // ---------------------------------------------------------
-    if (session.status !== "active") {
-      return res.status(400).json({
-        message: "Attendance session is closed.",
-      });
-    }
-
-    // ---------------------------------------------------------
-    // Check Expiry
-    // ---------------------------------------------------------
-    if (new Date() > session.endTime) {
-      session.status = "closed";
-      await session.save();
-
-      return res.status(400).json({
-        message: "QR Code has expired.",
-      });
-    }
-
-    // ---------------------------------------------------------
-    // Check lecturer GPS
-    // ---------------------------------------------------------
-    const lecturerLatitude = Number(
-      session.lecturerLatitude
-    );
-
-    const lecturerLongitude = Number(
-      session.lecturerLongitude
-    );
-
-    if (
-      !Number.isFinite(lecturerLatitude) ||
-      !Number.isFinite(lecturerLongitude)
-    ) {
-      return res.status(500).json({
-        message:
-          "Lecturer location is not available for this attendance session.",
-      });
-    }
-
-    // ---------------------------------------------------------
-    // Check distance
-    // ---------------------------------------------------------
-    if (
-      recordedDistance === null ||
-      !Number.isFinite(recordedDistance)
-    ) {
-      return res.status(400).json({
-        message:
-          "Unable to verify your distance from the lecturer.",
-      });
-    }
-
-    // ---------------------------------------------------------
-    // 50-meter attendance rule
-    // ---------------------------------------------------------
-    if (recordedDistance > 50) {
+    if (calculatedDistance > ALLOWED_RADIUS) {
       return res.status(403).json({
-        message: `Attendance rejected. You are ${recordedDistance.toFixed(
-          1
-        )} meters away from the lecturer. You must be within 50 meters.`,
+        message: `You are ${Math.round(
+          calculatedDistance
+        )}m away from the lecturer. You must be within ${ALLOWED_RADIUS}m.`,
+        distance: calculatedDistance,
+        allowedRadius: ALLOWED_RADIUS,
       });
     }
 
-    // ---------------------------------------------------------
-    // Check Duplicate Scan
-    // ---------------------------------------------------------
+    // --------------------------------------------------
+    // 9. Check duplicate attendance
+    // --------------------------------------------------
     const alreadyScanned = await Attendance.findOne({
       student: studentId,
       session: session._id,
     });
 
+    console.log("ALREADY SCANNED:", alreadyScanned);
+
     if (alreadyScanned) {
-      return res.status(400).json({
-        message: "Attendance already recorded.",
+      return res.status(409).json({
+        message: "You have already marked attendance for this session",
       });
     }
 
-    // ---------------------------------------------------------
-    // Location verification
-    // ---------------------------------------------------------
-    const locationVerified = recordedDistance <= 50;
+    // --------------------------------------------------
+    // 10. Create attendance record
+    // --------------------------------------------------
+    console.log("Creating attendance...");
 
-    // ---------------------------------------------------------
-    // Save Attendance
-    // ---------------------------------------------------------
     const attendance = await Attendance.create({
       student: studentId,
       lecturer: session.lecturer,
       course: session.course,
       session: session._id,
-
       status: "Present",
 
       studentLatitude,
       studentLongitude,
-      studentAccuracy: Number.isFinite(studentAccuracy)
-        ? studentAccuracy
-        : null,
+      studentAccuracy,
 
-      distanceFromLecturer: recordedDistance,
-
-      locationVerified,
+      distanceFromLecturer: calculatedDistance,
+      locationVerified: true,
     });
 
-    // ---------------------------------------------------------
-    // Successful response
-    // ---------------------------------------------------------
+    console.log("ATTENDANCE CREATED:", attendance);
+
+    // --------------------------------------------------
+    // 11. Success
+    // --------------------------------------------------
     return res.status(201).json({
-      message: "Attendance recorded successfully.",
+      message: "Attendance recorded successfully",
       attendance,
     });
   } catch (error) {
-    console.error(
-      "SCAN ATTENDANCE ERROR:",
-      error
-    );
+    // VERY IMPORTANT
+    console.error("====================================");
+    console.error("SCAN ATTENDANCE ERROR");
+    console.error("NAME:", error.name);
+    console.error("MESSAGE:", error.message);
+    console.error("STACK:", error.stack);
+    console.error("====================================");
 
     return res.status(500).json({
       message: "Server Error",
       error: error.message,
+      errorName: error.name,
     });
   }
 };
