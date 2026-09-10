@@ -81,10 +81,9 @@ export const startAttendanceSession = async (req, res) => {
     // CHECK COURSE ASSIGNMENT
     // ==========================================
 
-    const assignment =
-      await CourseAssignment.findById(
-        courseAssignmentId
-      );
+    const assignment = await CourseAssignment.findById(
+      courseAssignmentId
+    );
 
     if (!assignment) {
       return res.status(404).json({
@@ -96,26 +95,47 @@ export const startAttendanceSession = async (req, res) => {
     // CHECK ACTIVE SESSION
     // ==========================================
 
-    const activeSession =
-      await AttendanceSession.findOne({
-        courseAssignment: courseAssignmentId,
-        status: "active",
-      });
+    const activeSession = await AttendanceSession.findOne({
+      courseAssignment: courseAssignmentId,
+      status: "active",
+    });
 
     if (activeSession) {
-      return res.status(200).json({
-        message:
-          "Attendance session is already active.",
-        session: activeSession,
-      });
+      // ==========================================
+      // HANDLE OLD SESSION WITHOUT GPS
+      // ==========================================
+
+      if (
+        activeSession.lecturerLatitude === undefined ||
+        activeSession.lecturerLatitude === null ||
+        activeSession.lecturerLongitude === undefined ||
+        activeSession.lecturerLongitude === null
+      ) {
+        // Close the old session directly.
+        // updateOne is used so Mongoose does not
+        // validate the old missing GPS fields.
+        await AttendanceSession.updateOne(
+          { _id: activeSession._id },
+          {
+            $set: {
+              status: "closed",
+            },
+          }
+        );
+      } else {
+        // Existing valid GPS session
+        return res.status(200).json({
+          message: "Attendance session is already active.",
+          session: activeSession,
+        });
+      }
     }
 
     // ==========================================
     // GENERATE QR TOKEN
     // ==========================================
 
-    const qrToken =
-      crypto.randomBytes(16).toString("hex");
+    const qrToken = crypto.randomBytes(16).toString("hex");
 
     // ==========================================
     // SESSION TIME
@@ -132,35 +152,28 @@ export const startAttendanceSession = async (req, res) => {
     // CREATE SESSION
     // ==========================================
 
-    const session =
-      await AttendanceSession.create({
-        courseAssignment: assignment._id,
+    const session = await AttendanceSession.create({
+      courseAssignment: assignment._id,
+      lecturer: assignment.lecturer,
+      course: assignment.course,
+      qrToken,
 
-        lecturer: assignment.lecturer,
+      // Lecturer GPS
+      lecturerLatitude: latitude,
+      lecturerLongitude: longitude,
+      lecturerAccuracy: accuracy,
 
-        course: assignment.course,
-
-        qrToken,
-
-        lecturerLatitude: latitude,
-
-        lecturerLongitude: longitude,
-
-        lecturerAccuracy: accuracy,
-
-        startTime,
-
-        endTime,
-      });
+      startTime,
+      endTime,
+      status: "active",
+    });
 
     // ==========================================
     // RESPONSE
     // ==========================================
 
     res.status(201).json({
-      message:
-        "Attendance session started successfully.",
-
+      message: "Attendance session started successfully.",
       session,
     });
   } catch (error) {
@@ -180,26 +193,22 @@ export const startAttendanceSession = async (req, res) => {
 // GET ALL ATTENDANCE SESSIONS
 // ==========================================
 
-export const getAttendanceSessions = async (
-  req,
-  res
-) => {
+export const getAttendanceSessions = async (req, res) => {
   try {
-    const sessions =
-      await AttendanceSession.find()
-        .populate({
-          path: "lecturer",
-          select: "name staffId",
-        })
-        .populate({
-          path: "course",
-          select: "courseName courseCode",
-        })
-        .populate({
-          path: "courseAssignment",
-          select: "academicYear semester",
-        })
-        .sort({ createdAt: -1 });
+    const sessions = await AttendanceSession.find()
+      .populate({
+        path: "lecturer",
+        select: "name staffId",
+      })
+      .populate({
+        path: "course",
+        select: "courseName courseCode",
+      })
+      .populate({
+        path: "courseAssignment",
+        select: "academicYear semester",
+      })
+      .sort({ createdAt: -1 });
 
     res.status(200).json({
       sessions,
@@ -234,13 +243,16 @@ export const getAttendanceSessionByToken = async (
       });
     }
 
-    const session =
-      await AttendanceSession.findOne({
-        qrToken,
-      }).populate({
-        path: "course",
-        select: "courseName courseCode",
-      });
+    // ==========================================
+    // FIND SESSION
+    // ==========================================
+
+    const session = await AttendanceSession.findOne({
+      qrToken,
+    }).populate({
+      path: "course",
+      select: "courseName courseCode",
+    });
 
     if (!session) {
       return res.status(404).json({
@@ -254,8 +266,35 @@ export const getAttendanceSessionByToken = async (
 
     if (session.status !== "active") {
       return res.status(400).json({
+        message: "Attendance session is closed.",
+      });
+    }
+
+    // ==========================================
+    // CHECK LECTURER GPS
+    // ==========================================
+
+    if (
+      session.lecturerLatitude === undefined ||
+      session.lecturerLatitude === null ||
+      session.lecturerLongitude === undefined ||
+      session.lecturerLongitude === null
+    ) {
+      // This is an old session created before GPS
+      // was added to the system.
+
+      await AttendanceSession.updateOne(
+        { _id: session._id },
+        {
+          $set: {
+            status: "closed",
+          },
+        }
+      );
+
+      return res.status(400).json({
         message:
-          "Attendance session is closed.",
+          "This attendance session does not have lecturer location data. Please ask the lecturer to start a new attendance session.",
       });
     }
 
@@ -264,9 +303,17 @@ export const getAttendanceSessionByToken = async (
     // ==========================================
 
     if (new Date() > session.endTime) {
-      session.status = "closed";
-
-      await session.save();
+      // Use updateOne instead of session.save()
+      // so old/legacy documents cannot trigger
+      // GPS validation errors.
+      await AttendanceSession.updateOne(
+        { _id: session._id },
+        {
+          $set: {
+            status: "closed",
+          },
+        }
+      );
 
       return res.status(400).json({
         message: "QR Code has expired.",
@@ -302,27 +349,37 @@ export const closeAttendanceSession = async (
   res
 ) => {
   try {
-    const session =
-      await AttendanceSession.findById(
-        req.params.id
-      );
+    const session = await AttendanceSession.findById(
+      req.params.id
+    );
 
     if (!session) {
       return res.status(404).json({
-        message:
-          "Attendance session not found.",
+        message: "Attendance session not found.",
       });
     }
 
-    session.status = "closed";
+    // ==========================================
+    // CLOSE SESSION DIRECTLY
+    // ==========================================
 
-    await session.save();
+    await AttendanceSession.updateOne(
+      { _id: session._id },
+      {
+        $set: {
+          status: "closed",
+        },
+      }
+    );
+
+    // Get updated session
+    const updatedSession =
+      await AttendanceSession.findById(session._id);
 
     res.status(200).json({
       message:
         "Attendance session closed successfully.",
-
-      session,
+      session: updatedSession,
     });
   } catch (error) {
     console.error(
