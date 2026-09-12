@@ -36,30 +36,31 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+
     isVerified: {
-  type: Boolean,
-  default: false,
-},
+      type: Boolean,
+      default: false,
+    },
 
-verificationCode: {
-  type: String,
-  default: null,
-},
+    verificationCode: {
+      type: String,
+      default: null,
+    },
 
-verificationCodeExpires: {
-  type: Date,
-  default: null,
-},
+    verificationCodeExpires: {
+      type: Date,
+      default: null,
+    },
 
-resetPasswordCode: {
-    type: String,
-    default: null,
-},
+    resetPasswordCode: {
+      type: String,
+      default: null,
+    },
 
-resetPasswordCodeExpires: {
-    type: Date,
-    default: null,
-},
+    resetPasswordCodeExpires: {
+      type: Date,
+      default: null,
+    },
 
     department: {
       type: String,
@@ -69,6 +70,13 @@ resetPasswordCodeExpires: {
     level: {
       type: String,
       default: null,
+    },
+
+    // Automatically assigned by the student organization system
+    className: {
+      type: String,
+      default: null,
+      trim: true,
     },
   },
   { timestamps: true }
