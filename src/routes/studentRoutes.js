@@ -4,16 +4,14 @@ import {
   getStudents,
   createStudent,
   organizeStudents,
+  updateStudent,
+  deleteStudent,
 } from "../controllers/studentController.js";
 
 import { protect } from "../middleware/authMiddleware.js";
 import authorizeRoles from "../middleware/roleMiddleware.js";
 
 const router = express.Router();
-
-// =========================================================
-// ORGANIZE STUDENTS
-// =========================================================
 
 router.post(
   "/organize",
@@ -22,10 +20,6 @@ router.post(
   organizeStudents
 );
 
-// =========================================================
-// GET ALL STUDENTS
-// =========================================================
-
 router.get(
   "/",
   protect,
@@ -33,9 +27,19 @@ router.get(
   getStudents
 );
 
-// =========================================================
-// CREATE STUDENT
-// =========================================================
+router.put(
+  "/:id",
+  protect,
+  authorizeRoles("admin"),
+  updateStudent
+);
+
+router.delete(
+  "/:id",
+  protect,
+  authorizeRoles("admin"),
+  deleteStudent
+);
 
 router.post(
   "/",

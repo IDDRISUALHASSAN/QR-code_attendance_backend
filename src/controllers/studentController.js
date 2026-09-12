@@ -1,7 +1,6 @@
 import User from "../models/User.js";
 import bcrypt from "bcryptjs";
 
-
 // =========================================================
 // GET ALL STUDENTS
 // =========================================================
@@ -15,7 +14,6 @@ export const getStudents = async (req, res) => {
     res.status(200).json({
       students,
     });
-
   } catch (error) {
     res.status(500).json({
       message: "Server Error",
@@ -23,7 +21,6 @@ export const getStudents = async (req, res) => {
     });
   }
 };
-
 
 // =========================================================
 // CREATE STUDENT — ADMIN ONLY
@@ -80,7 +77,6 @@ export const createStudent = async (req, res) => {
       message: "Student created successfully.",
       student: studentResponse,
     });
-
   } catch (error) {
     console.error("Create student error:", error);
 
@@ -90,7 +86,6 @@ export const createStudent = async (req, res) => {
     });
   }
 };
-
 
 // =========================================================
 // ORGANIZE STUDENTS INTO FIVE CLASSES
@@ -119,7 +114,6 @@ export const organizeStudents = async (req, res) => {
       "Class E",
     ];
 
-    // Find only students who do not have a class yet.
     const students = await User.find({
       role: "student",
       $or: [
@@ -129,7 +123,6 @@ export const organizeStudents = async (req, res) => {
       ],
     }).select("_id name department level className");
 
-    // Nothing to organize.
     if (students.length === 0) {
       return res.status(200).json({
         message:
@@ -138,10 +131,6 @@ export const organizeStudents = async (req, res) => {
         groups: [],
       });
     }
-
-    // =====================================================
-    // GROUP STUDENTS BY DEPARTMENT + LEVEL
-    // =====================================================
 
     const groups = new Map();
 
@@ -170,14 +159,9 @@ export const organizeStudents = async (req, res) => {
     const operations = [];
     const summaries = [];
 
-    // =====================================================
-    // RANDOM + BALANCED CLASS ASSIGNMENT
-    // =====================================================
-
     for (const group of groups.values()) {
       const shuffledStudents = [...group.students];
 
-      // Fisher-Yates shuffle
       for (
         let i = shuffledStudents.length - 1;
         i > 0;
@@ -204,7 +188,6 @@ export const organizeStudents = async (req, res) => {
         "Class E": 0,
       };
 
-      // Round-robin assignment keeps classes balanced.
       shuffledStudents.forEach((student, index) => {
         const className =
           classNames[index % classNames.length];
@@ -233,17 +216,9 @@ export const organizeStudents = async (req, res) => {
       });
     }
 
-    // =====================================================
-    // SAVE ALL ASSIGNMENTS
-    // =====================================================
-
     if (operations.length > 0) {
       await User.bulkWrite(operations);
     }
-
-    // =====================================================
-    // RESPONSE
-    // =====================================================
 
     res.status(200).json({
       message: `${students.length} student${
@@ -254,7 +229,6 @@ export const organizeStudents = async (req, res) => {
 
       groups: summaries,
     });
-
   } catch (error) {
     console.error(
       "Organize students error:",
@@ -264,6 +238,113 @@ export const organizeStudents = async (req, res) => {
     res.status(500).json({
       message:
         "Server error while organizing students.",
+      error: error.message,
+    });
+  }
+};
+
+// =========================================================
+// UPDATE STUDENT — ADMIN ONLY
+// =========================================================
+
+export const updateStudent = async (req, res) => {
+  try {
+    const { name, email, indexNumber, department, level } = req.body;
+
+    const student = await User.findOne({
+      _id: req.params.id,
+      role: "student",
+    });
+
+    if (!student) {
+      return res.status(404).json({
+        message: "Student not found.",
+      });
+    }
+
+    if (
+      email !== undefined &&
+      email.toLowerCase().trim() !== student.email
+    ) {
+      const existingUser = await User.findOne({
+        email: email.toLowerCase().trim(),
+        _id: { $ne: student._id },
+      });
+
+      if (existingUser) {
+        return res.status(400).json({
+          message: "Email is already in use.",
+        });
+      }
+    }
+
+    if (name !== undefined) {
+      student.name = name.trim();
+    }
+
+    if (email !== undefined) {
+      student.email = email.toLowerCase().trim();
+    }
+
+    if (indexNumber !== undefined) {
+      student.indexNumber = indexNumber.trim();
+    }
+
+    if (department !== undefined) {
+      student.department = department || null;
+    }
+
+    if (level !== undefined) {
+      student.level = level || null;
+    }
+
+    await student.save();
+
+    const updatedStudent = student.toObject();
+
+    delete updatedStudent.password;
+
+    res.status(200).json({
+      message: "Student updated successfully.",
+      student: updatedStudent,
+    });
+  } catch (error) {
+    console.error("Update student error:", error);
+
+    res.status(500).json({
+      message: "Server error while updating student.",
+      error: error.message,
+    });
+  }
+};
+
+// =========================================================
+// DELETE STUDENT — ADMIN ONLY
+// =========================================================
+
+export const deleteStudent = async (req, res) => {
+  try {
+    const student = await User.findOne({
+      _id: req.params.id,
+      role: "student",
+    });
+
+    if (!student) {
+      return res.status(404).json({
+        message: "Student not found.",
+      });
+    }
+
+    await User.findByIdAndDelete(student._id);
+
+    res.status(200).json({
+      message: "Student deleted successfully.",
+    });
+  } catch (error) {
+    console.error("Delete student error:", error);
+
+    res.status(500).json({
+      message: "Server error while deleting student.",
       error: error.message,
     });
   }
