@@ -169,7 +169,7 @@ export const scanAttendance = async (req, res) => {
     // 8. Attendance distance rule
     // --------------------------------------------------
 
-    const ALLOWED_RADIUS = 200000;
+    const ALLOWED_RADIUS = 300000;
 
     if (calculatedDistance > ALLOWED_RADIUS) {
       return res.status(403).json({
