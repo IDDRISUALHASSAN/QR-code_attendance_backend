@@ -3,18 +3,45 @@ import express from "express";
 import {
   getStudents,
   createStudent,
+  organizeStudents,
 } from "../controllers/studentController.js";
-import { updateStudent, deleteStudent } from "../controllers/userController.js";
+
 import { protect } from "../middleware/authMiddleware.js";
-import { authorizeRoles } from "../middleware/roleMiddleware.js";
-
-
+import authorizeRoles from "../middleware/roleMiddleware.js";
 
 const router = express.Router();
 
-router.get("/",protect, authorizeRoles("admin"), getStudents);
-router.put("/:id", protect, authorizeRoles("admin"), updateStudent);
-router.delete("/:id", protect, authorizeRoles("admin"), deleteStudent);
-router.post("/",protect, authorizeRoles("admin"),createStudent);
+// =========================================================
+// ORGANIZE STUDENTS
+// =========================================================
+
+router.post(
+  "/organize",
+  protect,
+  authorizeRoles("admin"),
+  organizeStudents
+);
+
+// =========================================================
+// GET ALL STUDENTS
+// =========================================================
+
+router.get(
+  "/",
+  protect,
+  authorizeRoles("admin"),
+  getStudents
+);
+
+// =========================================================
+// CREATE STUDENT
+// =========================================================
+
+router.post(
+  "/",
+  protect,
+  authorizeRoles("admin"),
+  createStudent
+);
 
 export default router;
