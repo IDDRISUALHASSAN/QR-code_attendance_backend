@@ -20,15 +20,32 @@ const attendanceSessionSchema = new mongoose.Schema(
       required: true,
     },
 
+    // Class for this attendance session
+    className: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    // Department and level are copied from the course
+    // when the attendance session is created.
+    department: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    level: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
     qrToken: {
       type: String,
       required: true,
       unique: true,
     },
-
-    // ==========================================
-    // LECTURER GPS LOCATION
-    // ==========================================
 
     lecturerLatitude: {
       type: Number,
