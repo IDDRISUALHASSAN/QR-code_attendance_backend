@@ -2,7 +2,6 @@ import Attendance from "../models/Attendance.js";
 import AttendanceSession from "../models/AttendanceSession.js";
 import User from "../models/User.js";
 
-
 /*
 |--------------------------------------------------------------------------
 | Scan Attendance
@@ -428,7 +427,7 @@ export const getSessionAttendance = async (
     }
 
     // --------------------------------------------------
-    // 2. Get all attendance records
+    // 2. Get ALL students who actually scanned
     // --------------------------------------------------
 
     const attendanceRecords =
@@ -444,75 +443,48 @@ export const getSessionAttendance = async (
           scannedAt: 1,
         });
 
+    console.log(
+      "===================================="
+    );
+
+    console.log(
+      "SESSION ATTENDANCE"
+    );
+
+    console.log(
+      "Session ID:",
+      sessionId
+    );
+
+    console.log(
+      "Scanned records:",
+      attendanceRecords.length
+    );
+
+    console.log(
+      "===================================="
+    );
+
     // --------------------------------------------------
-    // 3. Legacy-session fallback
+    // 3. Session information
     // --------------------------------------------------
 
     const department =
       session.department ||
-      session.course?.department;
+      session.course?.department ||
+      null;
 
     const level =
       session.level ||
-      session.course?.level;
+      session.course?.level ||
+      null;
 
     const className =
-      session.className;
+      session.className ||
+      null;
 
     // --------------------------------------------------
-    // 4. If this is an old session that does not
-    //    contain class information, return the
-    //    attendance records normally.
-    // --------------------------------------------------
-
-    if (!department || !level || !className) {
-      const legacyAttendance =
-        attendanceRecords.map((record) => ({
-          ...record.toObject(),
-          status:
-            record.status || "Present",
-        }));
-
-      return res.status(200).json({
-        session,
-        attendance: legacyAttendance,
-        totalStudents:
-          legacyAttendance.length,
-        presentCount:
-          legacyAttendance.filter(
-            (record) =>
-              record.status === "Present"
-          ).length,
-        absentCount: 0,
-        attendanceRate:
-          legacyAttendance.length > 0
-            ? 100
-            : 0,
-      });
-    }
-
-    // --------------------------------------------------
-    // 5. Find the complete class roster
-    // --------------------------------------------------
-
-    const students = await User.find({
-      role: "student",
-
-      department: department,
-
-      level: level,
-
-      className: className,
-    })
-      .select(
-        "name indexNumber email department level className"
-      )
-      .sort({
-        name: 1,
-      });
-
-    // --------------------------------------------------
-    // 6. Create attendance lookup
+    // 4. Create attendance lookup
     // --------------------------------------------------
 
     const attendanceMap = new Map();
@@ -527,54 +499,112 @@ export const getSessionAttendance = async (
     });
 
     // --------------------------------------------------
-    // 7. Merge roster with attendance
+    // 5. Get class roster
     // --------------------------------------------------
 
-    const completeAttendance =
-      students.map((student) => {
-        const studentId =
-          student._id.toString();
+    let students = [];
 
-        const record =
-          attendanceMap.get(studentId);
+    if (
+      department &&
+      level &&
+      className
+    ) {
+      students = await User.find({
+        role: "student",
+        department: department,
+        level: level,
+        className: className,
+      })
+        .select(
+          "name indexNumber email department level className"
+        )
+        .sort({
+          name: 1,
+        });
+    }
 
-        if (record) {
-          return {
-            ...record.toObject(),
+    // --------------------------------------------------
+    // 6. Add EVERY student who actually scanned
+    // --------------------------------------------------
 
-            student: student.toObject(),
+    const completeAttendance = [];
 
-            status:
-              record.status || "Present",
-          };
-        }
+    attendanceRecords.forEach((record) => {
+      if (!record.student?._id) {
+        return;
+      }
 
-        return {
-          _id: `absent-${studentId}`,
+      completeAttendance.push({
+        ...record.toObject(),
 
-          student: student.toObject(),
+        student:
+          record.student.toObject(),
 
-          session: session._id,
-
-          course: session.course?._id,
-
-          lecturer: session.lecturer,
-
-          status: "Absent",
-
-          scannedAt: null,
-
-          studentLatitude: null,
-
-          studentLongitude: null,
-
-          studentAccuracy: null,
-
-          distanceFromLecturer: null,
-
-          locationVerified: false,
-        };
+        status:
+          record.status || "Present",
       });
+    });
+
+    // --------------------------------------------------
+    // 7. Add absent students from class roster
+    // --------------------------------------------------
+
+    const scannedStudentIds =
+      new Set(
+        attendanceRecords
+          .filter(
+            (record) =>
+              record.student?._id
+          )
+          .map(
+            (record) =>
+              record.student._id.toString()
+          )
+      );
+
+    students.forEach((student) => {
+      const studentId =
+        student._id.toString();
+
+      // Student already scanned.
+      if (
+        scannedStudentIds.has(
+          studentId
+        )
+      ) {
+        return;
+      }
+
+      completeAttendance.push({
+        _id: `absent-${studentId}`,
+
+        student:
+          student.toObject(),
+
+        session:
+          session._id,
+
+        course:
+          session.course?._id,
+
+        lecturer:
+          session.lecturer,
+
+        status: "Absent",
+
+        scannedAt: null,
+
+        studentLatitude: null,
+
+        studentLongitude: null,
+
+        studentAccuracy: null,
+
+        distanceFromLecturer: null,
+
+        locationVerified: false,
+      });
+    });
 
     // --------------------------------------------------
     // 8. Calculate statistics
@@ -586,13 +616,19 @@ export const getSessionAttendance = async (
     const presentCount =
       completeAttendance.filter(
         (record) =>
-          record.status === "Present"
+          String(
+            record.status
+          ).toLowerCase() ===
+          "present"
       ).length;
 
     const absentCount =
       completeAttendance.filter(
         (record) =>
-          record.status === "Absent"
+          String(
+            record.status
+          ).toLowerCase() ===
+          "absent"
       ).length;
 
     const attendanceRate =
@@ -607,6 +643,21 @@ export const getSessionAttendance = async (
     // --------------------------------------------------
     // 9. Return complete attendance
     // --------------------------------------------------
+
+    console.log(
+      "Total students returned:",
+      totalStudents
+    );
+
+    console.log(
+      "Present:",
+      presentCount
+    );
+
+    console.log(
+      "Absent:",
+      absentCount
+    );
 
     return res.status(200).json({
       session,
