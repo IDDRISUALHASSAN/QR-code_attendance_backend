@@ -8,32 +8,47 @@ import User from "../models/User.js";
 const getPeriodRange = (period, from, to) => {
   const now = new Date();
 
-  // Start of current week: Monday
+  // ----------------------------------------------------------
+  // Start of current week: Monday 00:00:00
+  // ----------------------------------------------------------
   const currentDay = now.getDay();
+
   const daysFromMonday =
     currentDay === 0 ? 6 : currentDay - 1;
 
   const thisWeekStart = new Date(now);
+
   thisWeekStart.setHours(0, 0, 0, 0);
+
   thisWeekStart.setDate(
     thisWeekStart.getDate() - daysFromMonday
   );
 
-  // End of current week
-  const thisWeekEnd = new Date(thisWeekStart);
+  // ----------------------------------------------------------
+  // Start of next week
+  // ----------------------------------------------------------
+  const thisWeekEnd = new Date(
+    thisWeekStart
+  );
+
   thisWeekEnd.setDate(
     thisWeekEnd.getDate() + 7
   );
 
-  // Previous week
-  const lastWeekStart = new Date(thisWeekStart);
+  // ----------------------------------------------------------
+  // Start of last week
+  // ----------------------------------------------------------
+  const lastWeekStart = new Date(
+    thisWeekStart
+  );
+
   lastWeekStart.setDate(
     lastWeekStart.getDate() - 7
   );
 
-  const lastWeekEnd = new Date(thisWeekStart);
-
+  // ----------------------------------------------------------
   // This week
+  // ----------------------------------------------------------
   if (period === "thisWeek") {
     return {
       start: thisWeekStart,
@@ -41,15 +56,19 @@ const getPeriodRange = (period, from, to) => {
     };
   }
 
+  // ----------------------------------------------------------
   // Last week
+  // ----------------------------------------------------------
   if (period === "lastWeek") {
     return {
       start: lastWeekStart,
-      end: lastWeekEnd,
+      end: thisWeekStart,
     };
   }
 
+  // ----------------------------------------------------------
   // Both weeks
+  // ----------------------------------------------------------
   if (period === "bothWeeks") {
     return {
       start: lastWeekStart,
@@ -57,9 +76,22 @@ const getPeriodRange = (period, from, to) => {
     };
   }
 
+  // ----------------------------------------------------------
   // Custom period
+  // ----------------------------------------------------------
   if (period === "custom") {
     if (!from || !to) {
+      return null;
+    }
+
+    // Validate date format before creating Date objects.
+    const fromMatch =
+      /^\d{4}-\d{2}-\d{2}$/.test(from);
+
+    const toMatch =
+      /^\d{4}-\d{2}-\d{2}$/.test(to);
+
+    if (!fromMatch || !toMatch) {
       return null;
     }
 
@@ -88,7 +120,9 @@ const getPeriodRange = (period, from, to) => {
     };
   }
 
+  // ----------------------------------------------------------
   // All time
+  // ----------------------------------------------------------
   return null;
 };
 
@@ -96,7 +130,10 @@ const getPeriodRange = (period, from, to) => {
 // ============================================================
 // SCAN ATTENDANCE
 // ============================================================
-export const scanAttendance = async (req, res) => {
+export const scanAttendance = async (
+  req,
+  res
+) => {
   try {
     const {
       qrToken,
@@ -495,8 +532,7 @@ export const getLecturerAttendanceSessions =
         );
 
       // ------------------------------------------------------
-      // IMPORTANT:
-      // Frontend expects { sessions: [...] }
+      // Return sessions
       // ------------------------------------------------------
       return res.status(200).json({
         sessions:
@@ -528,7 +564,7 @@ export const getLecturerAttendanceReport =
         req.params;
 
       const {
-        period,
+        period = "all",
         from,
         to,
       } = req.query;
@@ -553,12 +589,35 @@ export const getLecturerAttendanceReport =
       // lecturer can only access own report
       // ------------------------------------------------------
       if (
+        !req.user ||
         req.user._id.toString() !==
-        lecturerId.toString()
+          lecturerId.toString()
       ) {
         return res.status(403).json({
           message:
             "You can only access your own attendance report.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // Validate period
+      // ------------------------------------------------------
+      const validPeriods = [
+        "thisWeek",
+        "lastWeek",
+        "bothWeeks",
+        "custom",
+        "all",
+      ];
+
+      if (
+        !validPeriods.includes(
+          period
+        )
+      ) {
+        return res.status(400).json({
+          message:
+            "Invalid attendance report period.",
         });
       }
 
@@ -572,6 +631,9 @@ export const getLecturerAttendanceReport =
           to
         );
 
+      // ------------------------------------------------------
+      // Validate custom period
+      // ------------------------------------------------------
       if (
         period === "custom" &&
         !dateRange
@@ -583,7 +645,7 @@ export const getLecturerAttendanceReport =
       }
 
       // ------------------------------------------------------
-      // Build query
+      // Build attendance query
       // ------------------------------------------------------
       const query = {
         lecturer: lecturerId,
@@ -592,7 +654,7 @@ export const getLecturerAttendanceReport =
       if (dateRange) {
         query.scannedAt = {
           $gte: dateRange.start,
-          $lte: dateRange.end,
+          $lt: dateRange.end,
         };
       }
 
@@ -623,11 +685,13 @@ export const getLecturerAttendanceReport =
             scannedAt: -1,
           });
 
+      // ------------------------------------------------------
+      // Return report
+      // ------------------------------------------------------
       return res.status(200).json({
         attendance,
 
-        period:
-          period || "all",
+        period,
 
         from:
           dateRange?.start ||
@@ -921,10 +985,32 @@ export const getAllAttendance =
   async (req, res) => {
     try {
       const {
-        period,
+        period = "all",
         from,
         to,
       } = req.query;
+
+      // ------------------------------------------------------
+      // Validate period
+      // ------------------------------------------------------
+      const validPeriods = [
+        "thisWeek",
+        "lastWeek",
+        "bothWeeks",
+        "custom",
+        "all",
+      ];
+
+      if (
+        !validPeriods.includes(
+          period
+        )
+      ) {
+        return res.status(400).json({
+          message:
+            "Invalid attendance report period.",
+        });
+      }
 
       // ------------------------------------------------------
       // Get selected period
@@ -936,6 +1022,9 @@ export const getAllAttendance =
           to
         );
 
+      // ------------------------------------------------------
+      // Validate custom period
+      // ------------------------------------------------------
       if (
         period === "custom" &&
         !dateRange
@@ -954,7 +1043,7 @@ export const getAllAttendance =
       if (dateRange) {
         query.scannedAt = {
           $gte: dateRange.start,
-          $lte: dateRange.end,
+          $lt: dateRange.end,
         };
       }
 
@@ -991,8 +1080,7 @@ export const getAllAttendance =
       return res.status(200).json({
         attendance,
 
-        period:
-          period || "all",
+        period,
 
         from:
           dateRange?.start ||
