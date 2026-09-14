@@ -2,7 +2,6 @@ import Attendance from "../models/Attendance.js";
 import AttendanceSession from "../models/AttendanceSession.js";
 import User from "../models/User.js";
 
-
 // ============================================================
 // HELPER: GET PERIOD DATE RANGE
 // ============================================================
@@ -11,7 +10,8 @@ const getPeriodRange = (period, from, to) => {
 
   // Start of current week: Monday
   const currentDay = now.getDay();
-  const daysFromMonday = currentDay === 0 ? 6 : currentDay - 1;
+  const daysFromMonday =
+    currentDay === 0 ? 6 : currentDay - 1;
 
   const thisWeekStart = new Date(now);
   thisWeekStart.setHours(0, 0, 0, 0);
@@ -19,15 +19,21 @@ const getPeriodRange = (period, from, to) => {
     thisWeekStart.getDate() - daysFromMonday
   );
 
+  // End of current week
   const thisWeekEnd = new Date(thisWeekStart);
-  thisWeekEnd.setDate(thisWeekEnd.getDate() + 7);
+  thisWeekEnd.setDate(
+    thisWeekEnd.getDate() + 7
+  );
 
   // Previous week
   const lastWeekStart = new Date(thisWeekStart);
-  lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+  lastWeekStart.setDate(
+    lastWeekStart.getDate() - 7
+  );
 
   const lastWeekEnd = new Date(thisWeekStart);
 
+  // This week
   if (period === "thisWeek") {
     return {
       start: thisWeekStart,
@@ -35,6 +41,7 @@ const getPeriodRange = (period, from, to) => {
     };
   }
 
+  // Last week
   if (period === "lastWeek") {
     return {
       start: lastWeekStart,
@@ -42,6 +49,7 @@ const getPeriodRange = (period, from, to) => {
     };
   }
 
+  // Both weeks
   if (period === "bothWeeks") {
     return {
       start: lastWeekStart,
@@ -49,15 +57,28 @@ const getPeriodRange = (period, from, to) => {
     };
   }
 
+  // Custom period
   if (period === "custom") {
     if (!from || !to) {
       return null;
     }
 
-    const start = new Date(`${from}T00:00:00`);
-    const end = new Date(`${to}T23:59:59.999`);
+    const start = new Date(
+      `${from}T00:00:00`
+    );
 
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    const end = new Date(
+      `${to}T23:59:59.999`
+    );
+
+    if (
+      Number.isNaN(start.getTime()) ||
+      Number.isNaN(end.getTime())
+    ) {
+      return null;
+    }
+
+    if (start > end) {
       return null;
     }
 
@@ -67,6 +88,7 @@ const getPeriodRange = (period, from, to) => {
     };
   }
 
+  // All time
   return null;
 };
 
@@ -86,12 +108,19 @@ export const scanAttendance = async (req, res) => {
       scanDeviceId,
     } = req.body;
 
+    // --------------------------------------------------------
+    // Validate basic information
+    // --------------------------------------------------------
     if (!qrToken || !studentId) {
       return res.status(400).json({
-        message: "QR token and student ID are required.",
+        message:
+          "QR token and student ID are required.",
       });
     }
 
+    // --------------------------------------------------------
+    // Validate student GPS
+    // --------------------------------------------------------
     if (
       latitude === undefined ||
       latitude === null ||
@@ -99,38 +128,64 @@ export const scanAttendance = async (req, res) => {
       longitude === null
     ) {
       return res.status(400).json({
-        message: "Student GPS location is required.",
+        message:
+          "Student GPS location is required.",
       });
     }
 
+    // --------------------------------------------------------
+    // Validate scanning device
+    // --------------------------------------------------------
     if (!scanDeviceId) {
       return res.status(400).json({
-        message: "Scanning device could not be identified.",
+        message:
+          "Scanning device could not be identified.",
       });
     }
 
-    const session = await AttendanceSession.findOne({ qrToken })
-      .populate("course")
-      .populate("lecturer");
+    // --------------------------------------------------------
+    // Find attendance session
+    // --------------------------------------------------------
+    const session =
+      await AttendanceSession.findOne({
+        qrToken,
+      })
+        .populate("course")
+        .populate("lecturer");
 
     if (!session) {
       return res.status(404).json({
-        message: "Attendance session not found.",
+        message:
+          "Attendance session not found.",
       });
     }
 
+    // --------------------------------------------------------
+    // Check session status
+    // --------------------------------------------------------
     if (session.status !== "active") {
       return res.status(400).json({
-        message: "This attendance session is no longer active.",
+        message:
+          "This attendance session is no longer active.",
       });
     }
 
-    if (session.endTime && new Date() > new Date(session.endTime)) {
+    // --------------------------------------------------------
+    // Check session expiry
+    // --------------------------------------------------------
+    if (
+      session.endTime &&
+      new Date() > new Date(session.endTime)
+    ) {
       return res.status(400).json({
-        message: "This attendance session has expired.",
+        message:
+          "This attendance session has expired.",
       });
     }
 
+    // --------------------------------------------------------
+    // Check lecturer GPS
+    // --------------------------------------------------------
     if (
       session.lecturerLatitude === null ||
       session.lecturerLatitude === undefined ||
@@ -138,45 +193,66 @@ export const scanAttendance = async (req, res) => {
       session.lecturerLongitude === undefined
     ) {
       return res.status(400).json({
-        message: "Lecturer location is not available for this session.",
+        message:
+          "Lecturer location is not available for this session.",
       });
     }
 
+    // --------------------------------------------------------
+    // Allowed attendance radius
+    // --------------------------------------------------------
     const ALLOWED_RADIUS = 300000;
 
+    // --------------------------------------------------------
+    // Validate distance
+    // --------------------------------------------------------
     if (
       distanceFromLecturer === undefined ||
       distanceFromLecturer === null ||
-      Number.isNaN(Number(distanceFromLecturer))
+      Number.isNaN(
+        Number(distanceFromLecturer)
+      )
     ) {
       return res.status(400).json({
-        message: "Student location could not be verified.",
+        message:
+          "Student location could not be verified.",
       });
     }
 
-    if (Number(distanceFromLecturer) > ALLOWED_RADIUS) {
+    if (
+      Number(distanceFromLecturer) >
+      ALLOWED_RADIUS
+    ) {
       return res.status(403).json({
-        message: "You are outside the allowed attendance area.",
+        message:
+          "You are outside the allowed attendance area.",
       });
     }
 
-    // Student cannot scan the same session twice.
-    const alreadyScanned = await Attendance.findOne({
-      student: studentId,
-      session: session._id,
-    });
+    // --------------------------------------------------------
+    // Check if this student already scanned
+    // --------------------------------------------------------
+    const alreadyScanned =
+      await Attendance.findOne({
+        student: studentId,
+        session: session._id,
+      });
 
     if (alreadyScanned) {
       return res.status(409).json({
-        message: "You have already marked attendance for this session.",
+        message:
+          "You have already marked attendance for this session.",
       });
     }
 
-    // One device/browser can only scan once per session.
-    const deviceAlreadyScanned = await Attendance.findOne({
-      session: session._id,
-      scanDeviceId,
-    });
+    // --------------------------------------------------------
+    // Check if this device already scanned
+    // --------------------------------------------------------
+    const deviceAlreadyScanned =
+      await Attendance.findOne({
+        session: session._id,
+        scanDeviceId,
+      });
 
     if (deviceAlreadyScanned) {
       return res.status(409).json({
@@ -185,48 +261,82 @@ export const scanAttendance = async (req, res) => {
       });
     }
 
-    const student = await User.findById(studentId);
+    // --------------------------------------------------------
+    // Find student
+    // --------------------------------------------------------
+    const student =
+      await User.findById(studentId);
 
     if (!student) {
       return res.status(404).json({
-        message: "Student not found.",
+        message:
+          "Student not found.",
       });
     }
 
+    // --------------------------------------------------------
+    // Confirm user is a student
+    // --------------------------------------------------------
     if (student.role !== "student") {
       return res.status(403).json({
-        message: "Only students can mark attendance.",
+        message:
+          "Only students can mark attendance.",
       });
     }
 
+    // --------------------------------------------------------
+    // Create attendance record
+    // --------------------------------------------------------
     try {
-      const attendance = await Attendance.create({
-        student: studentId,
-        lecturer: session.lecturer._id || session.lecturer,
-        course: session.course._id || session.course,
-        session: session._id,
-        status: "Present",
+      const attendance =
+        await Attendance.create({
+          student: studentId,
 
-        studentLatitude: Number(latitude),
-        studentLongitude: Number(longitude),
+          lecturer:
+            session.lecturer._id ||
+            session.lecturer,
 
-        studentAccuracy:
-          accuracy !== undefined && accuracy !== null
-            ? Number(accuracy)
-            : null,
+          course:
+            session.course._id ||
+            session.course,
 
-        distanceFromLecturer: Number(distanceFromLecturer),
-        locationVerified: true,
+          session: session._id,
 
-        scanDeviceId,
-      });
+          status: "Present",
+
+          studentLatitude:
+            Number(latitude),
+
+          studentLongitude:
+            Number(longitude),
+
+          studentAccuracy:
+            accuracy !== undefined &&
+            accuracy !== null
+              ? Number(accuracy)
+              : null,
+
+          distanceFromLecturer:
+            Number(distanceFromLecturer),
+
+          locationVerified: true,
+
+          scanDeviceId,
+        });
 
       return res.status(201).json({
-        message: "Attendance recorded successfully.",
+        message:
+          "Attendance recorded successfully.",
+
         attendance,
       });
     } catch (createError) {
-      if (createError.code === 11000) {
+      // ------------------------------------------------------
+      // Handle duplicate device index
+      // ------------------------------------------------------
+      if (
+        createError.code === 11000
+      ) {
         return res.status(409).json({
           message:
             "This device has already been used to mark attendance for this session.",
@@ -236,10 +346,15 @@ export const scanAttendance = async (req, res) => {
       throw createError;
     }
   } catch (error) {
-    console.error("Scan attendance error:", error);
+    console.error(
+      "Scan attendance error:",
+      error
+    );
 
     return res.status(500).json({
-      message: "Failed to record attendance.",
+      message:
+        "Failed to record attendance.",
+
       error: error.message,
     });
   }
@@ -249,27 +364,47 @@ export const scanAttendance = async (req, res) => {
 // ============================================================
 // GET STUDENT ATTENDANCE
 // ============================================================
-export const getStudentAttendance = async (req, res) => {
+export const getStudentAttendance = async (
+  req,
+  res
+) => {
   try {
-    const { studentId } = req.params;
+    const { studentId } =
+      req.params;
 
-    const attendance = await Attendance.find({
-      student: studentId,
-    })
-      .populate("course", "courseName courseCode")
-      .populate("lecturer", "name email")
-      .populate(
-        "session",
-        "className department level date startTime endTime status"
-      )
-      .sort({ createdAt: -1 });
+    const attendance =
+      await Attendance.find({
+        student: studentId,
+      })
+        .populate(
+          "course",
+          "courseName courseCode"
+        )
+        .populate(
+          "lecturer",
+          "name email"
+        )
+        .populate(
+          "session",
+          "className department level date startTime endTime status"
+        )
+        .sort({
+          createdAt: -1,
+        });
 
-    return res.status(200).json(attendance);
+    return res.status(200).json(
+      attendance
+    );
   } catch (error) {
-    console.error("Get student attendance error:", error);
+    console.error(
+      "Get student attendance error:",
+      error
+    );
 
     return res.status(500).json({
-      message: "Failed to fetch student attendance.",
+      message:
+        "Failed to fetch student attendance.",
+
       error: error.message,
     });
   }
@@ -279,308 +414,605 @@ export const getStudentAttendance = async (req, res) => {
 // ============================================================
 // GET LECTURER ATTENDANCE SESSIONS
 // ============================================================
-export const getLecturerAttendanceSessions = async (req, res) => {
-  try {
-    const { lecturerId } = req.params;
+export const getLecturerAttendanceSessions =
+  async (req, res) => {
+    try {
+      const { lecturerId } =
+        req.params;
 
-    const sessions = await AttendanceSession.find({
-      lecturer: lecturerId,
-    })
-      .populate("course", "courseName courseCode")
-      .populate(
-        "courseAssignment",
-        "academicYear semester"
-      )
-      .sort({ createdAt: -1 });
+      // ------------------------------------------------------
+      // Make sure lecturer exists
+      // ------------------------------------------------------
+      const lecturer =
+        await User.findById(
+          lecturerId
+        );
 
-    const sessionsWithCounts = await Promise.all(
-      sessions.map(async (session) => {
-        const studentCount = await Attendance.countDocuments({
-          session: session._id,
+      if (!lecturer) {
+        return res.status(404).json({
+          message:
+            "Lecturer not found.",
         });
+      }
 
-        return {
-          ...session.toObject(),
-          studentCount,
-        };
-      })
-    );
+      // ------------------------------------------------------
+      // Security: lecturer can only access
+      // their own attendance sessions
+      // ------------------------------------------------------
+      if (
+        req.user &&
+        req.user.role === "lecturer" &&
+        req.user._id.toString() !==
+          lecturerId.toString()
+      ) {
+        return res.status(403).json({
+          message:
+            "You can only access your own attendance sessions.",
+        });
+      }
 
-    return res.status(200).json(sessionsWithCounts);
-  } catch (error) {
-    console.error(
-      "Get lecturer attendance sessions error:",
-      error
-    );
+      // ------------------------------------------------------
+      // Get lecturer sessions
+      // ------------------------------------------------------
+      const sessions =
+        await AttendanceSession.find({
+          lecturer: lecturerId,
+        })
+          .populate(
+            "course",
+            "courseName courseCode"
+          )
+          .populate(
+            "courseAssignment",
+            "academicYear semester"
+          )
+          .sort({
+            createdAt: -1,
+          });
 
-    return res.status(500).json({
-      message: "Failed to fetch lecturer attendance sessions.",
-      error: error.message,
-    });
-  }
-};
+      // ------------------------------------------------------
+      // Add attendance count to each session
+      // ------------------------------------------------------
+      const sessionsWithCounts =
+        await Promise.all(
+          sessions.map(
+            async (session) => {
+              const studentCount =
+                await Attendance.countDocuments(
+                  {
+                    session:
+                      session._id,
+                  }
+                );
+
+              return {
+                ...session.toObject(),
+
+                studentCount,
+              };
+            }
+          )
+        );
+
+      // ------------------------------------------------------
+      // IMPORTANT:
+      // Frontend expects { sessions: [...] }
+      // ------------------------------------------------------
+      return res.status(200).json({
+        sessions:
+          sessionsWithCounts,
+      });
+    } catch (error) {
+      console.error(
+        "Get lecturer attendance sessions error:",
+        error
+      );
+
+      return res.status(500).json({
+        message:
+          "Failed to fetch lecturer attendance sessions.",
+
+        error: error.message,
+      });
+    }
+  };
 
 
 // ============================================================
 // GET LECTURER ATTENDANCE REPORT
 // ============================================================
-export const getLecturerAttendanceReport = async (req, res) => {
-  try {
-    const { lecturerId } = req.params;
-    const { period, from, to } = req.query;
+export const getLecturerAttendanceReport =
+  async (req, res) => {
+    try {
+      const { lecturerId } =
+        req.params;
 
-    // Make sure the lecturer exists.
-    const lecturer = await User.findById(lecturerId);
+      const {
+        period,
+        from,
+        to,
+      } = req.query;
 
-    if (!lecturer) {
-      return res.status(404).json({
-        message: "Lecturer not found.",
-      });
-    }
+      // ------------------------------------------------------
+      // Make sure lecturer exists
+      // ------------------------------------------------------
+      const lecturer =
+        await User.findById(
+          lecturerId
+        );
 
-    // Security: lecturer can only access their own report.
-    if (req.user._id.toString() !== lecturerId.toString()) {
-      return res.status(403).json({
-        message: "You can only access your own attendance report.",
-      });
-    }
+      if (!lecturer) {
+        return res.status(404).json({
+          message:
+            "Lecturer not found.",
+        });
+      }
 
-    const dateRange = getPeriodRange(period, from, to);
+      // ------------------------------------------------------
+      // Security:
+      // lecturer can only access own report
+      // ------------------------------------------------------
+      if (
+        req.user._id.toString() !==
+        lecturerId.toString()
+      ) {
+        return res.status(403).json({
+          message:
+            "You can only access your own attendance report.",
+        });
+      }
 
-    if (period === "custom" && !dateRange) {
-      return res.status(400).json({
-        message: "A valid custom start and end date are required.",
-      });
-    }
+      // ------------------------------------------------------
+      // Get selected period
+      // ------------------------------------------------------
+      const dateRange =
+        getPeriodRange(
+          period,
+          from,
+          to
+        );
 
-    const query = {
-      lecturer: lecturerId,
-    };
+      if (
+        period === "custom" &&
+        !dateRange
+      ) {
+        return res.status(400).json({
+          message:
+            "A valid custom start and end date are required.",
+        });
+      }
 
-    if (dateRange) {
-      query.scannedAt = {
-        $gte: dateRange.start,
-        $lte: dateRange.end,
+      // ------------------------------------------------------
+      // Build query
+      // ------------------------------------------------------
+      const query = {
+        lecturer: lecturerId,
       };
+
+      if (dateRange) {
+        query.scannedAt = {
+          $gte: dateRange.start,
+          $lte: dateRange.end,
+        };
+      }
+
+      // ------------------------------------------------------
+      // Get attendance records
+      // ------------------------------------------------------
+      const attendance =
+        await Attendance.find(
+          query
+        )
+          .populate(
+            "student",
+            "name email indexNumber department level className"
+          )
+          .populate(
+            "lecturer",
+            "name email"
+          )
+          .populate(
+            "course",
+            "courseName courseCode"
+          )
+          .populate(
+            "session",
+            "className department level date startTime endTime status"
+          )
+          .sort({
+            scannedAt: -1,
+          });
+
+      return res.status(200).json({
+        attendance,
+
+        period:
+          period || "all",
+
+        from:
+          dateRange?.start ||
+          null,
+
+        to:
+          dateRange?.end ||
+          null,
+      });
+    } catch (error) {
+      console.error(
+        "Get lecturer attendance report error:",
+        error
+      );
+
+      return res.status(500).json({
+        message:
+          "Failed to fetch lecturer attendance report.",
+
+        error: error.message,
+      });
     }
-
-    const attendance = await Attendance.find(query)
-      .populate(
-        "student",
-        "name email indexNumber department level className"
-      )
-      .populate("lecturer", "name email")
-      .populate("course", "courseName courseCode")
-      .populate(
-        "session",
-        "className department level date startTime endTime status"
-      )
-      .sort({ scannedAt: -1 });
-
-    return res.status(200).json({
-      attendance,
-      period: period || "all",
-      from: dateRange?.start || null,
-      to: dateRange?.end || null,
-    });
-  } catch (error) {
-    console.error(
-      "Get lecturer attendance report error:",
-      error
-    );
-
-    return res.status(500).json({
-      message: "Failed to fetch lecturer attendance report.",
-      error: error.message,
-    });
-  }
-};
+  };
 
 
 // ============================================================
 // GET SESSION ATTENDANCE
 // ============================================================
-export const getSessionAttendance = async (req, res) => {
-  try {
-    const { sessionId } = req.params;
+export const getSessionAttendance =
+  async (req, res) => {
+    try {
+      const { sessionId } =
+        req.params;
 
-    const session = await AttendanceSession.findById(sessionId)
-      .populate("course", "courseName courseCode");
-
-    if (!session) {
-      return res.status(404).json({
-        message: "Attendance session not found.",
-      });
-    }
-
-    // Security: lecturer can only view their own session.
-    if (
-      req.user &&
-      req.user.role === "lecturer" &&
-      session.lecturer.toString() !== req.user._id.toString()
-    ) {
-      return res.status(403).json({
-        message: "You can only access your own attendance sessions.",
-      });
-    }
-
-    const actualAttendance = await Attendance.find({
-      session: session._id,
-    })
-      .populate(
-        "student",
-        "name email indexNumber department level className"
-      )
-      .sort({ scannedAt: 1 });
-
-    const attendanceMap = new Map();
-
-    actualAttendance.forEach((record) => {
-      if (record.student?._id) {
-        attendanceMap.set(
-          record.student._id.toString(),
-          record
+      // ------------------------------------------------------
+      // Find session
+      // ------------------------------------------------------
+      const session =
+        await AttendanceSession.findById(
+          sessionId
+        ).populate(
+          "course",
+          "courseName courseCode"
         );
-      }
-    });
 
-    const rosterStudents = await User.find({
-      role: "student",
-      department: session.department,
-      level: session.level,
-      className: session.className,
-    }).select(
-      "name email indexNumber department level className"
-    );
-
-    const completeAttendance = [];
-
-    actualAttendance.forEach((record) => {
-      completeAttendance.push({
-        _id: record._id,
-        student: record.student,
-        lecturer: record.lecturer,
-        course: record.course,
-        session: record.session,
-        status: record.status,
-        studentLatitude: record.studentLatitude,
-        studentLongitude: record.studentLongitude,
-        studentAccuracy: record.studentAccuracy,
-        distanceFromLecturer: record.distanceFromLecturer,
-        locationVerified: record.locationVerified,
-        scannedAt: record.scannedAt,
-      });
-    });
-
-    rosterStudents.forEach((student) => {
-      const studentId = student._id.toString();
-
-      if (!attendanceMap.has(studentId)) {
-        completeAttendance.push({
-          _id: null,
-          student,
-          lecturer: session.lecturer,
-          course: session.course,
-          session: session._id,
-          status: "Absent",
-          studentLatitude: null,
-          studentLongitude: null,
-          studentAccuracy: null,
-          distanceFromLecturer: null,
-          locationVerified: false,
-          scannedAt: null,
+      if (!session) {
+        return res.status(404).json({
+          message:
+            "Attendance session not found.",
         });
       }
-    });
 
-    const total = completeAttendance.length;
+      // ------------------------------------------------------
+      // Security:
+      // lecturer can only view own session
+      // ------------------------------------------------------
+      if (
+        req.user &&
+        req.user.role === "lecturer" &&
+        session.lecturer.toString() !==
+          req.user._id.toString()
+      ) {
+        return res.status(403).json({
+          message:
+            "You can only access your own attendance sessions.",
+        });
+      }
 
-    const present = completeAttendance.filter(
-      (record) => record.status === "Present"
-    ).length;
+      // ------------------------------------------------------
+      // Get actual attendance
+      // ------------------------------------------------------
+      const actualAttendance =
+        await Attendance.find({
+          session:
+            session._id,
+        })
+          .populate(
+            "student",
+            "name email indexNumber department level className"
+          )
+          .sort({
+            scannedAt: 1,
+          });
 
-    const absent = completeAttendance.filter(
-      (record) => record.status === "Absent"
-    ).length;
+      // ------------------------------------------------------
+      // Create attendance map
+      // ------------------------------------------------------
+      const attendanceMap =
+        new Map();
 
-    const attendanceRate =
-      total > 0
-        ? Number(((present / total) * 100).toFixed(2))
-        : 0;
+      actualAttendance.forEach(
+        (record) => {
+          if (record.student?._id) {
+            attendanceMap.set(
+              record.student._id.toString(),
+              record
+            );
+          }
+        }
+      );
 
-    return res.status(200).json({
-      session,
-      attendance: completeAttendance,
-      summary: {
-        total,
-        present,
-        absent,
-        attendanceRate,
-      },
-    });
-  } catch (error) {
-    console.error(
-      "Get session attendance error:",
-      error
-    );
+      // ------------------------------------------------------
+      // Get students belonging to the
+      // session's department, level and class
+      // ------------------------------------------------------
+      const rosterStudents =
+        await User.find({
+          role: "student",
 
-    return res.status(500).json({
-      message: "Failed to fetch session attendance.",
-      error: error.message,
-    });
-  }
-};
+          department:
+            session.department,
+
+          level:
+            session.level,
+
+          className:
+            session.className,
+        }).select(
+          "name email indexNumber department level className"
+        );
+
+      // ------------------------------------------------------
+      // Complete attendance list
+      // ------------------------------------------------------
+      const completeAttendance =
+        [];
+
+      // ------------------------------------------------------
+      // Add students who are present
+      // ------------------------------------------------------
+      actualAttendance.forEach(
+        (record) => {
+          completeAttendance.push({
+            _id:
+              record._id,
+
+            student:
+              record.student,
+
+            lecturer:
+              record.lecturer,
+
+            course:
+              record.course,
+
+            session:
+              record.session,
+
+            status:
+              record.status,
+
+            studentLatitude:
+              record.studentLatitude,
+
+            studentLongitude:
+              record.studentLongitude,
+
+            studentAccuracy:
+              record.studentAccuracy,
+
+            distanceFromLecturer:
+              record.distanceFromLecturer,
+
+            locationVerified:
+              record.locationVerified,
+
+            scannedAt:
+              record.scannedAt,
+          });
+        }
+      );
+
+      // ------------------------------------------------------
+      // Add absent students
+      // ------------------------------------------------------
+      rosterStudents.forEach(
+        (student) => {
+          const studentId =
+            student._id.toString();
+
+          if (
+            !attendanceMap.has(
+              studentId
+            )
+          ) {
+            completeAttendance.push({
+              _id: null,
+
+              student,
+
+              lecturer:
+                session.lecturer,
+
+              course:
+                session.course,
+
+              session:
+                session._id,
+
+              status:
+                "Absent",
+
+              studentLatitude:
+                null,
+
+              studentLongitude:
+                null,
+
+              studentAccuracy:
+                null,
+
+              distanceFromLecturer:
+                null,
+
+              locationVerified:
+                false,
+
+              scannedAt:
+                null,
+            });
+          }
+        }
+      );
+
+      // ------------------------------------------------------
+      // Summary
+      // ------------------------------------------------------
+      const total =
+        completeAttendance.length;
+
+      const present =
+        completeAttendance.filter(
+          (record) =>
+            record.status ===
+            "Present"
+        ).length;
+
+      const absent =
+        completeAttendance.filter(
+          (record) =>
+            record.status ===
+            "Absent"
+        ).length;
+
+      const attendanceRate =
+        total > 0
+          ? Number(
+              (
+                (present / total) *
+                100
+              ).toFixed(2)
+            )
+          : 0;
+
+      // ------------------------------------------------------
+      // Return session attendance
+      // ------------------------------------------------------
+      return res.status(200).json({
+        session,
+
+        attendance:
+          completeAttendance,
+
+        summary: {
+          total,
+          present,
+          absent,
+          attendanceRate,
+        },
+      });
+    } catch (error) {
+      console.error(
+        "Get session attendance error:",
+        error
+      );
+
+      return res.status(500).json({
+        message:
+          "Failed to fetch session attendance.",
+
+        error: error.message,
+      });
+    }
+  };
 
 
 // ============================================================
 // GET ALL ATTENDANCE / ADMIN REPORT
 // ============================================================
-export const getAllAttendance = async (req, res) => {
-  try {
-    const { period, from, to } = req.query;
+export const getAllAttendance =
+  async (req, res) => {
+    try {
+      const {
+        period,
+        from,
+        to,
+      } = req.query;
 
-    const dateRange = getPeriodRange(period, from, to);
+      // ------------------------------------------------------
+      // Get selected period
+      // ------------------------------------------------------
+      const dateRange =
+        getPeriodRange(
+          period,
+          from,
+          to
+        );
 
-    if (period === "custom" && !dateRange) {
-      return res.status(400).json({
-        message: "A valid custom start and end date are required.",
+      if (
+        period === "custom" &&
+        !dateRange
+      ) {
+        return res.status(400).json({
+          message:
+            "A valid custom start and end date are required.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // Build query
+      // ------------------------------------------------------
+      const query = {};
+
+      if (dateRange) {
+        query.scannedAt = {
+          $gte: dateRange.start,
+          $lte: dateRange.end,
+        };
+      }
+
+      // ------------------------------------------------------
+      // Get all attendance records
+      // ------------------------------------------------------
+      const attendance =
+        await Attendance.find(
+          query
+        )
+          .populate(
+            "student",
+            "name email indexNumber department level className"
+          )
+          .populate(
+            "lecturer",
+            "name email"
+          )
+          .populate(
+            "course",
+            "courseName courseCode"
+          )
+          .populate(
+            "session",
+            "className department level startTime endTime status"
+          )
+          .sort({
+            scannedAt: -1,
+          });
+
+      // ------------------------------------------------------
+      // Return admin report
+      // ------------------------------------------------------
+      return res.status(200).json({
+        attendance,
+
+        period:
+          period || "all",
+
+        from:
+          dateRange?.start ||
+          null,
+
+        to:
+          dateRange?.end ||
+          null,
+      });
+    } catch (error) {
+      console.error(
+        "Get all attendance error:",
+        error
+      );
+
+      return res.status(500).json({
+        message:
+          "Failed to fetch attendance records.",
+
+        error: error.message,
       });
     }
-
-    const query = {};
-
-    if (dateRange) {
-      query.scannedAt = {
-        $gte: dateRange.start,
-        $lte: dateRange.end,
-      };
-    }
-
-    const attendance = await Attendance.find(query)
-      .populate(
-        "student",
-        "name email indexNumber department level className"
-      )
-      .populate("lecturer", "name email")
-      .populate("course", "courseName courseCode")
-      .populate(
-        "session",
-        "className department level startTime endTime status"
-      )
-      .sort({ scannedAt: -1 });
-
-    return res.status(200).json({
-      attendance,
-      period: period || "all",
-      from: dateRange?.start || null,
-      to: dateRange?.end || null,
-    });
-  } catch (error) {
-    console.error("Get all attendance error:", error);
-
-    return res.status(500).json({
-      message: "Failed to fetch attendance records.",
-      error: error.message,
-    });
-  }
-};
+  };
