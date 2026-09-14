@@ -31,10 +31,6 @@ const attendanceSchema = new mongoose.Schema(
       default: "Present",
     },
 
-    // ==========================================
-    // STUDENT GPS LOCATION
-    // ==========================================
-
     studentLatitude: {
       type: Number,
       default: null,
@@ -50,22 +46,22 @@ const attendanceSchema = new mongoose.Schema(
       default: null,
     },
 
-    // ==========================================
-    // DISTANCE FROM LECTURER
-    // ==========================================
-
     distanceFromLecturer: {
       type: Number,
       default: null,
     },
 
-    // ==========================================
-    // LOCATION VERIFICATION
-    // ==========================================
-
     locationVerified: {
       type: Boolean,
       default: false,
+    },
+
+    // Identifies the browser/device that scanned this attendance session.
+    // The value is generated on the student's device and stored in localStorage.
+    scanDeviceId: {
+      type: String,
+      required: true,
+      trim: true,
     },
 
     scannedAt: {
@@ -73,12 +69,25 @@ const attendanceSchema = new mongoose.Schema(
       default: Date.now,
     },
   },
+  { timestamps: true }
+);
+
+/*
+ * Prevent the same device/browser from recording attendance
+ * more than once for the same attendance session.
+ *
+ * partialFilterExpression is used so existing attendance
+ * records that were created before scanDeviceId was added
+ * will not cause a duplicate-index problem.
+ */
+attendanceSchema.index(
+  { session: 1, scanDeviceId: 1 },
   {
-    timestamps: true,
+    unique: true,
+    partialFilterExpression: {
+      scanDeviceId: { $type: "string" },
+    },
   }
 );
 
-export default mongoose.model(
-  "Attendance",
-  attendanceSchema
-);
+export default mongoose.model("Attendance", attendanceSchema);

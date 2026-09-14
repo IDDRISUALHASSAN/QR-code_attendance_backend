@@ -2,16 +2,80 @@ import Attendance from "../models/Attendance.js";
 import AttendanceSession from "../models/AttendanceSession.js";
 import User from "../models/User.js";
 
-/*
-|--------------------------------------------------------------------------
-| Scan Attendance
-|--------------------------------------------------------------------------
-*/
+
+// ============================================================
+// HELPER: GET PERIOD DATE RANGE
+// ============================================================
+const getPeriodRange = (period, from, to) => {
+  const now = new Date();
+
+  // Start of current week: Monday
+  const currentDay = now.getDay();
+  const daysFromMonday = currentDay === 0 ? 6 : currentDay - 1;
+
+  const thisWeekStart = new Date(now);
+  thisWeekStart.setHours(0, 0, 0, 0);
+  thisWeekStart.setDate(
+    thisWeekStart.getDate() - daysFromMonday
+  );
+
+  const thisWeekEnd = new Date(thisWeekStart);
+  thisWeekEnd.setDate(thisWeekEnd.getDate() + 7);
+
+  // Previous week
+  const lastWeekStart = new Date(thisWeekStart);
+  lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+
+  const lastWeekEnd = new Date(thisWeekStart);
+
+  if (period === "thisWeek") {
+    return {
+      start: thisWeekStart,
+      end: thisWeekEnd,
+    };
+  }
+
+  if (period === "lastWeek") {
+    return {
+      start: lastWeekStart,
+      end: lastWeekEnd,
+    };
+  }
+
+  if (period === "bothWeeks") {
+    return {
+      start: lastWeekStart,
+      end: thisWeekEnd,
+    };
+  }
+
+  if (period === "custom") {
+    if (!from || !to) {
+      return null;
+    }
+
+    const start = new Date(`${from}T00:00:00`);
+    const end = new Date(`${to}T23:59:59.999`);
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      return null;
+    }
+
+    return {
+      start,
+      end,
+    };
+  }
+
+  return null;
+};
+
+
+// ============================================================
+// SCAN ATTENDANCE
+// ============================================================
 export const scanAttendance = async (req, res) => {
   try {
-    console.log("========== SCAN ATTENDANCE ==========");
-    console.log("BODY:", req.body);
-
     const {
       qrToken,
       studentId,
@@ -19,477 +83,359 @@ export const scanAttendance = async (req, res) => {
       longitude,
       accuracy,
       distanceFromLecturer,
+      scanDeviceId,
     } = req.body;
 
-    // --------------------------------------------------
-    // 1. Validate required data
-    // --------------------------------------------------
-
-    if (!qrToken) {
+    if (!qrToken || !studentId) {
       return res.status(400).json({
-        message: "QR token is required",
-      });
-    }
-
-    if (!studentId) {
-      return res.status(400).json({
-        message: "Student ID is required",
+        message: "QR token and student ID are required.",
       });
     }
 
     if (
       latitude === undefined ||
-      longitude === undefined
+      latitude === null ||
+      longitude === undefined ||
+      longitude === null
     ) {
       return res.status(400).json({
-        message: "Student location is required",
+        message: "Student GPS location is required.",
       });
     }
 
-    // --------------------------------------------------
-    // 2. Validate student coordinates
-    // --------------------------------------------------
-
-    const studentLatitude = Number(latitude);
-    const studentLongitude = Number(longitude);
-
-    const studentAccuracy =
-      accuracy !== undefined &&
-      accuracy !== null
-        ? Number(accuracy)
-        : null;
-
-    if (
-      !Number.isFinite(studentLatitude) ||
-      !Number.isFinite(studentLongitude)
-    ) {
+    if (!scanDeviceId) {
       return res.status(400).json({
-        message: "Invalid student GPS coordinates",
+        message: "Scanning device could not be identified.",
       });
     }
 
-    // --------------------------------------------------
-    // 3. Find attendance session
-    // --------------------------------------------------
-
-    const session =
-      await AttendanceSession.findOne({
-        qrToken,
-      });
-
-    console.log("SESSION:", session);
+    const session = await AttendanceSession.findOne({ qrToken })
+      .populate("course")
+      .populate("lecturer");
 
     if (!session) {
       return res.status(404).json({
-        message: "Attendance session not found",
+        message: "Attendance session not found.",
       });
     }
-
-    // --------------------------------------------------
-    // 4. Check session status
-    // --------------------------------------------------
 
     if (session.status !== "active") {
       return res.status(400).json({
-        message: "Attendance session is closed",
+        message: "This attendance session is no longer active.",
       });
     }
 
-    // --------------------------------------------------
-    // 5. Check session expiry
-    // --------------------------------------------------
-
-    if (
-      session.endTime &&
-      new Date() > new Date(session.endTime)
-    ) {
+    if (session.endTime && new Date() > new Date(session.endTime)) {
       return res.status(400).json({
-        message: "Attendance session has expired",
+        message: "This attendance session has expired.",
       });
     }
 
-    // --------------------------------------------------
-    // 6. Make sure lecturer GPS exists
-    // --------------------------------------------------
-
     if (
-      session.lecturerLatitude === undefined ||
       session.lecturerLatitude === null ||
-      session.lecturerLongitude === undefined ||
-      session.lecturerLongitude === null
+      session.lecturerLatitude === undefined ||
+      session.lecturerLongitude === null ||
+      session.lecturerLongitude === undefined
     ) {
       return res.status(400).json({
-        message:
-          "Lecturer location is not available for this session",
+        message: "Lecturer location is not available for this session.",
       });
     }
-
-    // --------------------------------------------------
-    // 7. Validate distance
-    // --------------------------------------------------
-
-    const calculatedDistance =
-      distanceFromLecturer !== undefined &&
-      distanceFromLecturer !== null
-        ? Number(distanceFromLecturer)
-        : null;
-
-    if (
-      calculatedDistance === null ||
-      !Number.isFinite(calculatedDistance)
-    ) {
-      return res.status(400).json({
-        message:
-          "Distance from lecturer is required",
-      });
-    }
-
-    console.log(
-      "Student latitude:",
-      studentLatitude
-    );
-
-    console.log(
-      "Student longitude:",
-      studentLongitude
-    );
-
-    console.log(
-      "Student accuracy:",
-      studentAccuracy
-    );
-
-    console.log(
-      "Distance:",
-      calculatedDistance
-    );
-
-    // --------------------------------------------------
-    // 8. Attendance distance rule
-    // --------------------------------------------------
 
     const ALLOWED_RADIUS = 300000;
 
-    if (calculatedDistance > ALLOWED_RADIUS) {
-      return res.status(403).json({
-        message: `You are ${Math.round(
-          calculatedDistance
-        )}m away from the lecturer. You must be within ${ALLOWED_RADIUS}m.`,
-        distance: calculatedDistance,
-        allowedRadius: ALLOWED_RADIUS,
+    if (
+      distanceFromLecturer === undefined ||
+      distanceFromLecturer === null ||
+      Number.isNaN(Number(distanceFromLecturer))
+    ) {
+      return res.status(400).json({
+        message: "Student location could not be verified.",
       });
     }
 
-    // --------------------------------------------------
-    // 9. Check duplicate attendance
-    // --------------------------------------------------
-
-    const alreadyScanned =
-      await Attendance.findOne({
-        student: studentId,
-        session: session._id,
+    if (Number(distanceFromLecturer) > ALLOWED_RADIUS) {
+      return res.status(403).json({
+        message: "You are outside the allowed attendance area.",
       });
+    }
 
-    console.log(
-      "ALREADY SCANNED:",
-      alreadyScanned
-    );
+    // Student cannot scan the same session twice.
+    const alreadyScanned = await Attendance.findOne({
+      student: studentId,
+      session: session._id,
+    });
 
     if (alreadyScanned) {
       return res.status(409).json({
-        message:
-          "You have already marked attendance for this session",
+        message: "You have already marked attendance for this session.",
       });
     }
 
-    // --------------------------------------------------
-    // 10. Create attendance record
-    // --------------------------------------------------
+    // One device/browser can only scan once per session.
+    const deviceAlreadyScanned = await Attendance.findOne({
+      session: session._id,
+      scanDeviceId,
+    });
 
-    console.log("Creating attendance...");
+    if (deviceAlreadyScanned) {
+      return res.status(409).json({
+        message:
+          "This device has already been used to mark attendance for this session.",
+      });
+    }
 
-    const attendance =
-      await Attendance.create({
+    const student = await User.findById(studentId);
+
+    if (!student) {
+      return res.status(404).json({
+        message: "Student not found.",
+      });
+    }
+
+    if (student.role !== "student") {
+      return res.status(403).json({
+        message: "Only students can mark attendance.",
+      });
+    }
+
+    try {
+      const attendance = await Attendance.create({
         student: studentId,
-        lecturer: session.lecturer,
-        course: session.course,
+        lecturer: session.lecturer._id || session.lecturer,
+        course: session.course._id || session.course,
         session: session._id,
         status: "Present",
 
-        studentLatitude,
-        studentLongitude,
-        studentAccuracy,
+        studentLatitude: Number(latitude),
+        studentLongitude: Number(longitude),
 
-        distanceFromLecturer:
-          calculatedDistance,
+        studentAccuracy:
+          accuracy !== undefined && accuracy !== null
+            ? Number(accuracy)
+            : null,
 
+        distanceFromLecturer: Number(distanceFromLecturer),
         locationVerified: true,
+
+        scanDeviceId,
       });
 
-    console.log(
-      "ATTENDANCE CREATED:",
-      attendance
-    );
+      return res.status(201).json({
+        message: "Attendance recorded successfully.",
+        attendance,
+      });
+    } catch (createError) {
+      if (createError.code === 11000) {
+        return res.status(409).json({
+          message:
+            "This device has already been used to mark attendance for this session.",
+        });
+      }
 
-    // --------------------------------------------------
-    // 11. Success
-    // --------------------------------------------------
-
-    return res.status(201).json({
-      message:
-        "Attendance recorded successfully",
-      attendance,
-    });
+      throw createError;
+    }
   } catch (error) {
-    console.error(
-      "===================================="
-    );
-
-    console.error(
-      "SCAN ATTENDANCE ERROR"
-    );
-
-    console.error(
-      "NAME:",
-      error.name
-    );
-
-    console.error(
-      "MESSAGE:",
-      error.message
-    );
-
-    console.error(
-      "STACK:",
-      error.stack
-    );
-
-    console.error(
-      "===================================="
-    );
+    console.error("Scan attendance error:", error);
 
     return res.status(500).json({
-      message: "Server Error",
+      message: "Failed to record attendance.",
       error: error.message,
-      errorName: error.name,
     });
   }
 };
 
-/*
-|--------------------------------------------------------------------------
-| Get Student Attendance
-|--------------------------------------------------------------------------
-*/
-export const getStudentAttendance = async (
-  req,
-  res
-) => {
+
+// ============================================================
+// GET STUDENT ATTENDANCE
+// ============================================================
+export const getStudentAttendance = async (req, res) => {
   try {
     const { studentId } = req.params;
 
-    const attendance =
-      await Attendance.find({
-        student: studentId,
-      })
-        .populate({
-          path: "course",
-          select:
-            "courseName courseCode department level",
-        })
-        .populate({
-          path: "lecturer",
-          select: "name email",
-        })
-        .populate({
-          path: "session",
-          select:
-            "startTime endTime status lecturerLatitude lecturerLongitude className department level",
-        })
-        .sort({
-          createdAt: -1,
+    const attendance = await Attendance.find({
+      student: studentId,
+    })
+      .populate("course", "courseName courseCode")
+      .populate("lecturer", "name email")
+      .populate(
+        "session",
+        "className department level date startTime endTime status"
+      )
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json(attendance);
+  } catch (error) {
+    console.error("Get student attendance error:", error);
+
+    return res.status(500).json({
+      message: "Failed to fetch student attendance.",
+      error: error.message,
+    });
+  }
+};
+
+
+// ============================================================
+// GET LECTURER ATTENDANCE SESSIONS
+// ============================================================
+export const getLecturerAttendanceSessions = async (req, res) => {
+  try {
+    const { lecturerId } = req.params;
+
+    const sessions = await AttendanceSession.find({
+      lecturer: lecturerId,
+    })
+      .populate("course", "courseName courseCode")
+      .populate(
+        "courseAssignment",
+        "academicYear semester"
+      )
+      .sort({ createdAt: -1 });
+
+    const sessionsWithCounts = await Promise.all(
+      sessions.map(async (session) => {
+        const studentCount = await Attendance.countDocuments({
+          session: session._id,
         });
 
-    return res.status(200).json({
-      attendance,
-    });
+        return {
+          ...session.toObject(),
+          studentCount,
+        };
+      })
+    );
+
+    return res.status(200).json(sessionsWithCounts);
   } catch (error) {
     console.error(
-      "GET STUDENT ATTENDANCE ERROR:",
+      "Get lecturer attendance sessions error:",
       error
     );
 
     return res.status(500).json({
-      message: "Server Error",
+      message: "Failed to fetch lecturer attendance sessions.",
       error: error.message,
     });
   }
 };
 
-/*
-|--------------------------------------------------------------------------
-| Get Lecturer Attendance Sessions
-|--------------------------------------------------------------------------
-*/
-export const getLecturerAttendanceSessions =
-  async (req, res) => {
-    try {
-      const { lecturerId } = req.params;
 
-      const sessions =
-        await AttendanceSession.find({
-          lecturer: lecturerId,
-        })
-          .populate({
-            path: "course",
-            select:
-              "courseName courseCode department level",
-          })
-          .populate({
-            path: "courseAssignment",
-            select:
-              "academicYear semester",
-          })
-          .sort({
-            createdAt: -1,
-          });
+// ============================================================
+// GET LECTURER ATTENDANCE REPORT
+// ============================================================
+export const getLecturerAttendanceReport = async (req, res) => {
+  try {
+    const { lecturerId } = req.params;
+    const { period, from, to } = req.query;
 
-      const results = await Promise.all(
-        sessions.map(async (session) => {
-          const totalStudents =
-            await Attendance.countDocuments({
-              session: session._id,
-            });
+    // Make sure the lecturer exists.
+    const lecturer = await User.findById(lecturerId);
 
-          return {
-            ...session.toObject(),
-            totalStudents,
-          };
-        })
-      );
-
-      return res.status(200).json({
-        sessions: results,
-      });
-    } catch (error) {
-      console.error(
-        "GET LECTURER ATTENDANCE SESSIONS ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        message: "Server Error",
-        error: error.message,
+    if (!lecturer) {
+      return res.status(404).json({
+        message: "Lecturer not found.",
       });
     }
-  };
 
-/*
-|--------------------------------------------------------------------------
-| Get Complete Session Attendance
-|--------------------------------------------------------------------------
-|
-| This returns the COMPLETE class roster.
-|
-| Students who scanned:
-|     Present
-|
-| Students who did not scan:
-|     Absent
-|
-|--------------------------------------------------------------------------
-*/
-export const getSessionAttendance = async (
-  req,
-  res
-) => {
+    // Security: lecturer can only access their own report.
+    if (req.user._id.toString() !== lecturerId.toString()) {
+      return res.status(403).json({
+        message: "You can only access your own attendance report.",
+      });
+    }
+
+    const dateRange = getPeriodRange(period, from, to);
+
+    if (period === "custom" && !dateRange) {
+      return res.status(400).json({
+        message: "A valid custom start and end date are required.",
+      });
+    }
+
+    const query = {
+      lecturer: lecturerId,
+    };
+
+    if (dateRange) {
+      query.scannedAt = {
+        $gte: dateRange.start,
+        $lte: dateRange.end,
+      };
+    }
+
+    const attendance = await Attendance.find(query)
+      .populate(
+        "student",
+        "name email indexNumber department level className"
+      )
+      .populate("lecturer", "name email")
+      .populate("course", "courseName courseCode")
+      .populate(
+        "session",
+        "className department level date startTime endTime status"
+      )
+      .sort({ scannedAt: -1 });
+
+    return res.status(200).json({
+      attendance,
+      period: period || "all",
+      from: dateRange?.start || null,
+      to: dateRange?.end || null,
+    });
+  } catch (error) {
+    console.error(
+      "Get lecturer attendance report error:",
+      error
+    );
+
+    return res.status(500).json({
+      message: "Failed to fetch lecturer attendance report.",
+      error: error.message,
+    });
+  }
+};
+
+
+// ============================================================
+// GET SESSION ATTENDANCE
+// ============================================================
+export const getSessionAttendance = async (req, res) => {
   try {
     const { sessionId } = req.params;
 
-    // --------------------------------------------------
-    // 1. Find session
-    // --------------------------------------------------
-
-    const session =
-      await AttendanceSession.findById(
-        sessionId
-      ).populate({
-        path: "course",
-        select:
-          "courseName courseCode department level",
-      });
+    const session = await AttendanceSession.findById(sessionId)
+      .populate("course", "courseName courseCode");
 
     if (!session) {
       return res.status(404).json({
-        message:
-          "Attendance session not found.",
+        message: "Attendance session not found.",
       });
     }
 
-    // --------------------------------------------------
-    // 2. Get ALL students who actually scanned
-    // --------------------------------------------------
+    // Security: lecturer can only view their own session.
+    if (
+      req.user &&
+      req.user.role === "lecturer" &&
+      session.lecturer.toString() !== req.user._id.toString()
+    ) {
+      return res.status(403).json({
+        message: "You can only access your own attendance sessions.",
+      });
+    }
 
-    const attendanceRecords =
-      await Attendance.find({
-        session: sessionId,
-      })
-        .populate({
-          path: "student",
-          select:
-            "name indexNumber email department level className",
-        })
-        .sort({
-          scannedAt: 1,
-        });
-
-    console.log(
-      "===================================="
-    );
-
-    console.log(
-      "SESSION ATTENDANCE"
-    );
-
-    console.log(
-      "Session ID:",
-      sessionId
-    );
-
-    console.log(
-      "Scanned records:",
-      attendanceRecords.length
-    );
-
-    console.log(
-      "===================================="
-    );
-
-    // --------------------------------------------------
-    // 3. Session information
-    // --------------------------------------------------
-
-    const department =
-      session.department ||
-      session.course?.department ||
-      null;
-
-    const level =
-      session.level ||
-      session.course?.level ||
-      null;
-
-    const className =
-      session.className ||
-      null;
-
-    // --------------------------------------------------
-    // 4. Create attendance lookup
-    // --------------------------------------------------
+    const actualAttendance = await Attendance.find({
+      session: session._id,
+    })
+      .populate(
+        "student",
+        "name email indexNumber department level className"
+      )
+      .sort({ scannedAt: 1 });
 
     const attendanceMap = new Map();
 
-    attendanceRecords.forEach((record) => {
+    actualAttendance.forEach((record) => {
       if (record.student?._id) {
         attendanceMap.set(
           record.student._id.toString(),
@@ -498,241 +444,142 @@ export const getSessionAttendance = async (
       }
     });
 
-    // --------------------------------------------------
-    // 5. Get class roster
-    // --------------------------------------------------
-
-    let students = [];
-
-    if (
-      department &&
-      level &&
-      className
-    ) {
-      students = await User.find({
-        role: "student",
-        department: department,
-        level: level,
-        className: className,
-      })
-        .select(
-          "name indexNumber email department level className"
-        )
-        .sort({
-          name: 1,
-        });
-    }
-
-    // --------------------------------------------------
-    // 6. Add EVERY student who actually scanned
-    // --------------------------------------------------
+    const rosterStudents = await User.find({
+      role: "student",
+      department: session.department,
+      level: session.level,
+      className: session.className,
+    }).select(
+      "name email indexNumber department level className"
+    );
 
     const completeAttendance = [];
 
-    attendanceRecords.forEach((record) => {
-      if (!record.student?._id) {
-        return;
-      }
-
+    actualAttendance.forEach((record) => {
       completeAttendance.push({
-        ...record.toObject(),
-
-        student:
-          record.student.toObject(),
-
-        status:
-          record.status || "Present",
+        _id: record._id,
+        student: record.student,
+        lecturer: record.lecturer,
+        course: record.course,
+        session: record.session,
+        status: record.status,
+        studentLatitude: record.studentLatitude,
+        studentLongitude: record.studentLongitude,
+        studentAccuracy: record.studentAccuracy,
+        distanceFromLecturer: record.distanceFromLecturer,
+        locationVerified: record.locationVerified,
+        scannedAt: record.scannedAt,
       });
     });
 
-    // --------------------------------------------------
-    // 7. Add absent students from class roster
-    // --------------------------------------------------
+    rosterStudents.forEach((student) => {
+      const studentId = student._id.toString();
 
-    const scannedStudentIds =
-      new Set(
-        attendanceRecords
-          .filter(
-            (record) =>
-              record.student?._id
-          )
-          .map(
-            (record) =>
-              record.student._id.toString()
-          )
-      );
-
-    students.forEach((student) => {
-      const studentId =
-        student._id.toString();
-
-      // Student already scanned.
-      if (
-        scannedStudentIds.has(
-          studentId
-        )
-      ) {
-        return;
+      if (!attendanceMap.has(studentId)) {
+        completeAttendance.push({
+          _id: null,
+          student,
+          lecturer: session.lecturer,
+          course: session.course,
+          session: session._id,
+          status: "Absent",
+          studentLatitude: null,
+          studentLongitude: null,
+          studentAccuracy: null,
+          distanceFromLecturer: null,
+          locationVerified: false,
+          scannedAt: null,
+        });
       }
-
-      completeAttendance.push({
-        _id: `absent-${studentId}`,
-
-        student:
-          student.toObject(),
-
-        session:
-          session._id,
-
-        course:
-          session.course?._id,
-
-        lecturer:
-          session.lecturer,
-
-        status: "Absent",
-
-        scannedAt: null,
-
-        studentLatitude: null,
-
-        studentLongitude: null,
-
-        studentAccuracy: null,
-
-        distanceFromLecturer: null,
-
-        locationVerified: false,
-      });
     });
 
-    // --------------------------------------------------
-    // 8. Calculate statistics
-    // --------------------------------------------------
+    const total = completeAttendance.length;
 
-    const totalStudents =
-      completeAttendance.length;
+    const present = completeAttendance.filter(
+      (record) => record.status === "Present"
+    ).length;
 
-    const presentCount =
-      completeAttendance.filter(
-        (record) =>
-          String(
-            record.status
-          ).toLowerCase() ===
-          "present"
-      ).length;
-
-    const absentCount =
-      completeAttendance.filter(
-        (record) =>
-          String(
-            record.status
-          ).toLowerCase() ===
-          "absent"
-      ).length;
+    const absent = completeAttendance.filter(
+      (record) => record.status === "Absent"
+    ).length;
 
     const attendanceRate =
-      totalStudents > 0
-        ? Math.round(
-            (presentCount /
-              totalStudents) *
-              100
-          )
+      total > 0
+        ? Number(((present / total) * 100).toFixed(2))
         : 0;
-
-    // --------------------------------------------------
-    // 9. Return complete attendance
-    // --------------------------------------------------
-
-    console.log(
-      "Total students returned:",
-      totalStudents
-    );
-
-    console.log(
-      "Present:",
-      presentCount
-    );
-
-    console.log(
-      "Absent:",
-      absentCount
-    );
 
     return res.status(200).json({
       session,
-
-      attendance:
-        completeAttendance,
-
-      totalStudents,
-
-      presentCount,
-
-      absentCount,
-
-      attendanceRate,
+      attendance: completeAttendance,
+      summary: {
+        total,
+        present,
+        absent,
+        attendanceRate,
+      },
     });
   } catch (error) {
     console.error(
-      "GET SESSION ATTENDANCE ERROR:",
+      "Get session attendance error:",
       error
     );
 
     return res.status(500).json({
-      message: "Server Error",
+      message: "Failed to fetch session attendance.",
       error: error.message,
     });
   }
 };
 
-/*
-|--------------------------------------------------------------------------
-| Get All Attendance - Admin
-|--------------------------------------------------------------------------
-*/
-export const getAllAttendance = async (
-  req,
-  res
-) => {
+
+// ============================================================
+// GET ALL ATTENDANCE / ADMIN REPORT
+// ============================================================
+export const getAllAttendance = async (req, res) => {
   try {
-    const attendance =
-      await Attendance.find()
-        .populate({
-          path: "student",
-          select:
-            "name indexNumber email department level className",
-        })
-        .populate({
-          path: "lecturer",
-          select:
-            "name staffId email",
-        })
-        .populate({
-          path: "course",
-          select:
-            "courseName courseCode department level",
-        })
-        .populate({
-          path: "session",
-          select:
-            "startTime endTime status lecturerLatitude lecturerLongitude className department level",
-        })
-        .sort({
-          scannedAt: -1,
-        });
+    const { period, from, to } = req.query;
+
+    const dateRange = getPeriodRange(period, from, to);
+
+    if (period === "custom" && !dateRange) {
+      return res.status(400).json({
+        message: "A valid custom start and end date are required.",
+      });
+    }
+
+    const query = {};
+
+    if (dateRange) {
+      query.scannedAt = {
+        $gte: dateRange.start,
+        $lte: dateRange.end,
+      };
+    }
+
+    const attendance = await Attendance.find(query)
+      .populate(
+        "student",
+        "name email indexNumber department level className"
+      )
+      .populate("lecturer", "name email")
+      .populate("course", "courseName courseCode")
+      .populate(
+        "session",
+        "className department level startTime endTime status"
+      )
+      .sort({ scannedAt: -1 });
 
     return res.status(200).json({
       attendance,
+      period: period || "all",
+      from: dateRange?.start || null,
+      to: dateRange?.end || null,
     });
   } catch (error) {
-    console.error(
-      "GET ALL ATTENDANCE ERROR:",
-      error
-    );
+    console.error("Get all attendance error:", error);
 
     return res.status(500).json({
-      message: "Server Error",
+      message: "Failed to fetch attendance records.",
       error: error.message,
     });
   }

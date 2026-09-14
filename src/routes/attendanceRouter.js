@@ -4,17 +4,22 @@ import {
   scanAttendance,
   getStudentAttendance,
   getLecturerAttendanceSessions,
+  getLecturerAttendanceReport,
   getSessionAttendance,
   getAllAttendance,
 } from "../controllers/attendanceController.js";
 
 import { protect } from "../middleware/authMiddleware.js";
-import { authorizeRoles } from "../middleware/roleMiddleware.js";
+import authorizeRoles from "../middleware/roleMiddleware.js";
 
 const router = express.Router();
 
 
-// Student scans QR
+// ============================================================
+// STUDENT
+// ============================================================
+
+// Scan attendance
 router.post(
   "/scan",
   protect,
@@ -22,8 +27,7 @@ router.post(
   scanAttendance
 );
 
-
-// Student views attendance history
+// Student attendance history
 router.get(
   "/student/:studentId",
   protect,
@@ -32,7 +36,11 @@ router.get(
 );
 
 
-// Lecturer views their attendance sessions
+// ============================================================
+// LECTURER
+// ============================================================
+
+// Lecturer attendance sessions
 router.get(
   "/lecturer/:lecturerId",
   protect,
@@ -40,8 +48,15 @@ router.get(
   getLecturerAttendanceSessions
 );
 
+// Lecturer period-based attendance report
+router.get(
+  "/lecturer/:lecturerId/report",
+  protect,
+  authorizeRoles("lecturer"),
+  getLecturerAttendanceReport
+);
 
-// Lecturer views students who attended a session
+// Individual session attendance
 router.get(
   "/session/:sessionId",
   protect,
@@ -50,7 +65,11 @@ router.get(
 );
 
 
-// Admin views attendance report
+// ============================================================
+// ADMIN
+// ============================================================
+
+// Admin attendance report
 router.get(
   "/report",
   protect,
